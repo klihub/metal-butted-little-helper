@@ -53,5 +53,43 @@ forced to 5 and the variant nibble forced into [89ab]."
   "Return the session id for REPO-ROOT's current generation."
   (metal-butt-session-uuid repo-root (metal-butt-session-generation repo-root)))
 
+(defcustom metal-butt-roll-threshold 60000
+  "Roll the session once a response reports this many input tokens.
+Provisional.  Prompt caching makes a long session sublinear in cost,
+while a roll discards the cached prefix and pays for a full-context
+summarisation, so setting this too low costs more than it saves.  Tune it
+against observed `input_tokens' rather than by guessing."
+  :type 'integer
+  :group 'metal-butt)
+
+(defconst metal-butt-session-roll-prompt
+  "Write a handoff note for the session that replaces you. Include: what we are
+working on, decisions already made and why, files touched, corrections the user
+gave you, and open threads. If a previous handoff note appears above, produce a
+single replacement that supersedes it rather than a summary of it. Prose only, no
+JSON."
+  "Prompt used to extract a self-handoff before rolling.
+Deliberately asks for a replacement rather than a summary, so quality does
+not degrade by telephone game across generations.")
+
+(declare-function metal-butt-handoff-append "metal-butt-handoff")
+(declare-function metal-butt-transport-send "metal-butt-transport")
+
+(defun metal-butt-session-should-roll-p (input-tokens)
+  "Non-nil when INPUT-TOKENS has reached `metal-butt-roll-threshold'."
+  (>= input-tokens metal-butt-roll-threshold))
+
+(defun metal-butt-session-roll (repo-root)
+  "Ask the current session for a self-handoff, then start the next generation."
+  (metal-butt-transport-send
+   metal-butt-session-roll-prompt
+   (metal-butt-session-current-id repo-root)
+   (lambda (result error)
+     (if error
+         (message "Metal Butt: roll aborted, session left alone (%s)" error)
+       (metal-butt-handoff-append repo-root 'self-handoff (plist-get result :text))
+       (let ((generation (metal-butt-session-bump-generation repo-root)))
+         (message "Metal Butt: rolled to generation %d" generation))))))
+
 (provide 'metal-butt-session)
 ;;; metal-butt-session.el ends here

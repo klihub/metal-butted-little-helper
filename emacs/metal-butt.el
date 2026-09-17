@@ -66,7 +66,10 @@
         (metal-butt-response-invalid (message "Metal Butt: %s" (cadr e)))
         (metal-butt-overlay-no-match (message "Metal Butt: %s" (cadr e)))
         (metal-butt-overlay-ambiguous (message "Metal Butt: %s" (cadr e))))
-      (force-mode-line-update)))))
+      (force-mode-line-update)
+      (when (metal-butt-session-should-roll-p metal-butt--last-input-tokens)
+        (message "Metal Butt: context is large (%d input tokens); M-x metal-butt-roll-session"
+                 metal-butt--last-input-tokens))))))
 
 (defun metal-butt-send-prompt ()
   "Send the `claude:' comment block at or above point."
@@ -88,6 +91,11 @@
          (metal-butt-session-current-id root)
          (lambda (result error)
            (metal-butt--handle buffer prompt tick result error)))))))
+
+(defun metal-butt-roll-session ()
+  "Summarise this session into a handoff note and start a fresh generation."
+  (interactive)
+  (metal-butt-session-roll (metal-butt-repo-root)))
 
 (defvar metal-butt-mode-map
   (let ((map (make-sparse-keymap)))
