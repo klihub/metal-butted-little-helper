@@ -106,15 +106,17 @@ press. That is the one thing I could not do for you overnight, and it is where
 surprises will surface — most likely in how well the model sticks to the JSON
 response contract in practice.
 
-If the response comes back as prose rather than JSON, you will see a
-"does not match the contract" message rather than a mangled buffer. That is the
-design working, but it would mean the contract wording in
-`metal-butt-transport-contract` needs tightening.
+A Markdown code fence around the JSON is tolerated, since models add them even
+when told not to. But if a response comes back as prose rather than JSON, you
+will see a "does not match the contract" message rather than a mangled buffer.
+That is the design working — but it would mean the wording of
+`metal-butt-transport-contract` needs tightening, which is the single most likely
+thing to need adjusting after your first session.
 
 ## Tests
 
 ```sh
-make check      # 91 tests, zero API calls, costs nothing
+make check      # 98 tests, zero API calls, costs nothing
 make compile    # byte-compile, warnings are errors
 ```
 
@@ -123,10 +125,13 @@ exercised against a stub. Running the suite never spends money.
 
 ## Things I decided while you slept
 
-Read `.superpowers/sdd/2026-09-17-metal-butt/progress.md` — every ruling I made
-on your behalf is in there with what it costs if I got it wrong. The one most
-worth your attention is **Ruling 11**: I changed already-reviewed prompt-detection
-code so that a prompt is found up to 20 lines above point instead of exactly one,
-because the alternative was a tool that only worked when your point sat one line
-below your prompt. The bound is `metal-butt-prompt-search-limit` if you want it
-different.
+**`docs/superpowers/2026-09-17-metal-butt-rulings.md`** — fifteen decisions taken
+on your behalf, each with what it costs if I got it wrong. Three are worth your
+attention, and all three are things you might reasonably reverse:
+
+- I widened already-reviewed prompt detection so a prompt is found up to 20 lines
+  above point rather than exactly one (`metal-butt-prompt-search-limit`).
+- I deleted `metal-butt-fallback-model`, which the spec names, because nothing
+  read it — setting it bought a silent no-op.
+- I made a stale edit in a multi-edit response get skipped with a message rather
+  than aborting the rest.
