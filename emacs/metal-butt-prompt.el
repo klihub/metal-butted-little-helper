@@ -17,6 +17,13 @@
   :type 'string
   :group 'metal-butt)
 
+(defcustom metal-butt-prompt-search-limit 20
+  "How many lines above point to search for a prompt block.
+Bounded so that a far-away prompt elsewhere in the file is never picked up
+by accident."
+  :type 'integer
+  :group 'metal-butt)
+
 (defconst metal-butt-prompt--comment-rx
   "^\\([[:space:]]*\\)\\([^[:alnum:][:space:]]+\\)[[:space:]]*"
   "Matches indentation (group 1) and comment punctuation (group 2).")
@@ -54,27 +61,18 @@
           "")))))
 
 (defun metal-butt-prompt--find-attention-line ()
-  "Move point to the attention line of the block at or above point.
-Return non-nil on success."
+  "Move point to the attention line of the nearest prompt block at or above point.
+Return non-nil on success.  Searches at most
+`metal-butt-prompt-search-limit' lines upward, so a distant prompt is not
+picked up by accident."
   (beginning-of-line)
-  (cond
-   ((metal-butt-prompt--attention-line-p) t)
-   ;; Walk up through a contiguous comment run at the same indentation.
-   (t (let ((indent (metal-butt-prompt--line-indent))
-            (found nil))
-        (while (and (not found)
-                    (metal-butt-prompt--line-indent)
-                    (equal (metal-butt-prompt--line-indent) indent)
-                    (not (bobp)))
-          (forward-line -1)
-          (when (metal-butt-prompt--attention-line-p)
-            (setq found t)))
-        ;; Point started on a non-comment line: check the line directly above.
-        (unless (or found indent)
-          (forward-line -1)
-          (when (metal-butt-prompt--attention-line-p)
-            (setq found t)))
-        found))))
+  (let ((remaining metal-butt-prompt-search-limit)
+        (found (metal-butt-prompt--attention-line-p)))
+    (while (and (not found) (> remaining 0) (not (bobp)))
+      (forward-line -1)
+      (setq remaining (1- remaining))
+      (setq found (metal-butt-prompt--attention-line-p)))
+    found))
 
 (defun metal-butt-prompt-at-point ()
   "Return the prompt block at or above point, or nil.

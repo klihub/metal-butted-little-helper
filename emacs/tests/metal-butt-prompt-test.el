@@ -72,3 +72,23 @@
     (insert "int x = 1;\n")
     (goto-char (point-min))
     (should (equal "" (metal-butt-prompt--strip-line)))))
+
+(ert-deftest metal-butt-prompt-finds-block-several-lines-above ()
+  "Point is usually below the prompt, not on it."
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: refactor this\nint a = 1;\nint b = 2;\n|\n"
+    (should (equal (plist-get (metal-butt-prompt-at-point) :text)
+                   "refactor this"))))
+
+(ert-deftest metal-butt-prompt-respects-the-search-limit ()
+  "A prompt far above point must not be picked up by accident."
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: far away\nx\nx\nx\nx\nx\n|\n"
+    (let ((metal-butt-prompt-search-limit 3))
+      (should-not (metal-butt-prompt-at-point)))))
+
+(ert-deftest metal-butt-prompt-picks-the-nearest-block ()
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: the far one\nint a = 1;\n// claude: the near one\nint b = 2;\n|\n"
+    (should (equal (plist-get (metal-butt-prompt-at-point) :text)
+                   "the near one"))))

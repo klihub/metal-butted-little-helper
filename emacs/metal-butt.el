@@ -74,8 +74,7 @@
   (when metal-butt--in-flight
     (error "Metal Butt: a request is already in flight for this buffer"))
   (save-excursion
-    (let ((prompt (or (progn (goto-char (point-min))
-                             (metal-butt-prompt-at-point))
+    (let ((prompt (or (metal-butt-prompt-at-point)
                       (error "Metal Butt: no `%s:' comment block at point"
                              metal-butt-attention-word)))
           (root (metal-butt-repo-root)))
