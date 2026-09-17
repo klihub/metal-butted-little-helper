@@ -89,3 +89,29 @@
 (ert-deftest metal-butt-mode-does-not-bind-c-c-c-c ()
   "C-c C-c is comment-region in c-mode and send-buffer in python-mode."
   (should-not (lookup-key metal-butt-mode-map (kbd "C-c C-c"))))
+
+(ert-deftest metal-butt-handle-ignores-a-killed-buffer ()
+  "A response arriving after the buffer was killed must not signal."
+  (let ((buffer (generate-new-buffer " *metal-butt-dead*")))
+    (kill-buffer buffer)
+    (should-not (metal-butt--handle buffer nil 0 nil "boom"))))
+
+(ert-deftest metal-butt-send-clears-in-flight-on-launch-failure ()
+  "A transport that fails synchronously must not wedge the buffer."
+  (metal-butt-test--in-repo
+    (insert "// claude: hi\n")
+    (let ((metal-butt-transport-function (lambda (&rest _) (error "boom"))))
+      (should-error (metal-butt-send-prompt)))
+    (should-not metal-butt--in-flight)))
+
+(ert-deftest metal-butt-error-does-not-report-a-stale-cost ()
+  "After a failure the mode line must not show the previous prompt's cost."
+  (metal-butt-test--in-repo
+    (insert "// claude: hi\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"hi\"}"
+      (metal-butt-send-prompt))
+    (should (> metal-butt--last-cost 0))
+    (let ((metal-butt-transport-function
+           (lambda (_r _s cb) (funcall cb nil "explicit deny"))))
+      (metal-butt-send-prompt))
+    (should (= metal-butt--last-cost 0))))

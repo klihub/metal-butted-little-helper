@@ -7,14 +7,17 @@
 ;;; Code:
 
 (defun metal-butt-comment-insert (text position)
-  "Insert TEXT at POSITION as comment lines.  Return the end position."
-  (save-excursion
-    (goto-char position)
-    (unless (bolp) (insert "\n"))
-    (let ((beg (point)))
-      (insert (string-trim-right text) "\n")
-      (comment-region beg (point))
-      (point))))
+  "Insert TEXT at POSITION as comment lines.  Return the end position.
+A blank TEXT inserts nothing and returns POSITION."
+  (if (string-empty-p (string-trim text))
+      position
+    (save-excursion
+      (goto-char position)
+      (unless (bolp) (insert "\n"))
+      (let ((beg (point)))
+        (insert (string-trim-right text) "\n")
+        (comment-region beg (point))
+        (point)))))
 
 (provide 'metal-butt-comment)
 ;;; metal-butt-comment.el ends here

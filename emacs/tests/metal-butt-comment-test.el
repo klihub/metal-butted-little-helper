@@ -36,4 +36,13 @@
 (ert-deftest metal-butt-comment-returns-end-position ()
   (with-temp-buffer
     (emacs-lisp-mode)
-    (should (> (metal-butt-comment-insert "note" (point-max)) 1))))
+    (should (= (metal-butt-comment-insert "note" (point-max)) (point-max)))))
+
+(ert-deftest metal-butt-comment-blank-text-inserts-nothing ()
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(defun f ())\n")
+    (let ((before (buffer-string))
+          (end (point-max)))
+      (should (= end (metal-butt-comment-insert "   \n  " end)))
+      (should (equal before (buffer-string))))))

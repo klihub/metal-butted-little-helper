@@ -20,15 +20,11 @@
   :group 'metal-butt)
 
 (defcustom metal-butt-model "sonnet"
-  "Model used for buffer prompts."
+  "Model used for buffer prompts.
+There is deliberately no automatic fallback to a cheaper model.  A silent
+downgrade would change edit quality without the user knowing why, which is
+harder to diagnose than an outright error."
   :type 'string
-  :group 'metal-butt)
-
-(defcustom metal-butt-fallback-model nil
-  "Never set this to a cheaper model expecting a silent retry.
-A silent downgrade would change edit quality without the user knowing
-why suggestions got worse, which is harder to diagnose than an error."
-  :type '(choice (const :tag "No fallback" nil) string)
   :group 'metal-butt)
 
 (defconst metal-butt-transport-contract

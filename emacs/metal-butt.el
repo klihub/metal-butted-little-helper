@@ -51,25 +51,31 @@
     (delete-region (plist-get prompt :start) (plist-get prompt :end))))
 
 (defun metal-butt--handle (buffer prompt tick result error)
-  "Handle RESULT or ERROR for PROMPT sent from BUFFER at modification TICK."
-  (with-current-buffer buffer
-    (setq metal-butt--in-flight nil)
-    (cond
-     (error (message "Metal Butt: %s" error))
-     ((/= tick (buffer-chars-modified-tick))
-      (message "Metal Butt: buffer changed while the request was in flight; response discarded"))
-     (t
-      (setq metal-butt--last-cost (plist-get result :cost)
-            metal-butt--last-input-tokens (plist-get result :input-tokens))
-      (condition-case e
-          (metal-butt--apply (metal-butt-response-parse (plist-get result :text)) prompt)
-        (metal-butt-response-invalid (message "Metal Butt: %s" (cadr e)))
-        (metal-butt-overlay-no-match (message "Metal Butt: %s" (cadr e)))
-        (metal-butt-overlay-ambiguous (message "Metal Butt: %s" (cadr e))))
-      (force-mode-line-update)
-      (when (metal-butt-session-should-roll-p metal-butt--last-input-tokens)
-        (message "Metal Butt: context is large (%d input tokens); M-x metal-butt-roll-session"
-                 metal-butt--last-input-tokens))))))
+  "Handle RESULT or ERROR for PROMPT sent from BUFFER at modification TICK.
+Does nothing if BUFFER was killed while the request was in flight."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq metal-butt--in-flight nil)
+      (cond
+       (error
+        (setq metal-butt--last-cost 0
+              metal-butt--last-input-tokens 0)
+        (force-mode-line-update)
+        (message "Metal Butt: %s" error))
+       ((/= tick (buffer-chars-modified-tick))
+        (message "Metal Butt: buffer changed while the request was in flight; response discarded"))
+       (t
+        (setq metal-butt--last-cost (plist-get result :cost)
+              metal-butt--last-input-tokens (plist-get result :input-tokens))
+        (condition-case e
+            (metal-butt--apply (metal-butt-response-parse (plist-get result :text)) prompt)
+          (metal-butt-response-invalid (message "Metal Butt: %s" (cadr e)))
+          (metal-butt-overlay-no-match (message "Metal Butt: %s" (cadr e)))
+          (metal-butt-overlay-ambiguous (message "Metal Butt: %s" (cadr e))))
+        (force-mode-line-update)
+        (when (metal-butt-session-should-roll-p metal-butt--last-input-tokens)
+          (message "Metal Butt: context is large (%d input tokens); M-x metal-butt-roll-session"
+                   metal-butt--last-input-tokens)))))))
 
 (defun metal-butt-send-prompt ()
   "Send the `claude:' comment block at or above point."
@@ -86,11 +92,15 @@
             (buffer (current-buffer)))
         (setq metal-butt--in-flight t)
         (message "Metal Butt: thinking...")
-        (metal-butt-transport-send
-         request
-         (metal-butt-session-current-id root)
-         (lambda (result error)
-           (metal-butt--handle buffer prompt tick result error)))))))
+        (condition-case err
+            (metal-butt-transport-send
+             request
+             (metal-butt-session-current-id root)
+             (lambda (result error)
+               (metal-butt--handle buffer prompt tick result error)))
+          (error
+           (setq metal-butt--in-flight nil)
+           (signal (car err) (cdr err))))))))
 
 (defun metal-butt-roll-session ()
   "Summarise this session into a handoff note and start a fresh generation."

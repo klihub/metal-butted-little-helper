@@ -62,8 +62,8 @@ prefix and pays for a summarisation call, so it is not always cheaper.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `metal-butt-executable` | `"claude"` | Name or path of the Claude Code CLI |
 | `metal-butt-model` | `"sonnet"` | Model for buffer prompts |
-| `metal-butt-fallback-model` | `nil` | Leave nil; a silent downgrade hides why quality dropped |
 | `metal-butt-attention-word` | `"claude"` | Word before the colon |
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |

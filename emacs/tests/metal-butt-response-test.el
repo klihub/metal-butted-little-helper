@@ -44,3 +44,18 @@
 (ert-deftest metal-butt-response-rejects-empty-edits ()
   (should-error (metal-butt-response-parse "{\"kind\":\"edit\",\"edits\":[]}")
                 :type 'metal-butt-response-invalid))
+
+(ert-deftest metal-butt-response-tolerates-json-code-fences ()
+  (let ((r (metal-butt-response-parse
+            "```json\n{\"kind\":\"reply\",\"text\":\"hi\"}\n```")))
+    (should (equal (plist-get r :text) "hi"))))
+
+(ert-deftest metal-butt-response-tolerates-bare-code-fences ()
+  (let ((r (metal-butt-response-parse
+            "```\n{\"kind\":\"reply\",\"text\":\"hi\"}\n```")))
+    (should (equal (plist-get r :text) "hi"))))
+
+(ert-deftest metal-butt-response-still-rejects-prose ()
+  "Tolerating fences must not turn into tolerating anything."
+  (should-error (metal-butt-response-parse "Here you go: not json")
+                :type 'metal-butt-response-invalid))

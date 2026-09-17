@@ -22,11 +22,24 @@
     (unless (stringp new) (metal-butt-response--fail "edit is missing `new'"))
     (list :old old :new new :why (and (stringp why) why))))
 
+(defun metal-butt-response--strip-fences (json)
+  "Remove a surrounding Markdown code fence from JSON, if there is one.
+Models wrap JSON in fences even when told not to, and a fenced object is
+still unambiguously the response that was asked for."
+  (let ((text (string-trim json)))
+    (if (string-prefix-p "```" text)
+        (string-trim
+         (replace-regexp-in-string
+          "\n?```[ \t]*\\'" ""
+          (replace-regexp-in-string "\\````[a-zA-Z]*[ \t]*\n?" "" text)))
+      text)))
+
 (defun metal-butt-response-parse (json)
   "Parse JSON against the response contract.
 Signal `metal-butt-response-invalid' if it does not conform."
   (let ((data (condition-case err
-                  (json-parse-string json :object-type 'alist
+                  (json-parse-string (metal-butt-response--strip-fences json)
+                                     :object-type 'alist
                                      :null-object nil :false-object nil)
                 (error (metal-butt-response--fail "unparseable JSON: %s"
                                                   (error-message-string err))))))
