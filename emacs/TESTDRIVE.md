@@ -75,7 +75,7 @@ press `C-c C-a`.** `C-c C-r` rejects it.
 
 ## What works right now
 
-Tasks 1–9 of 11 are complete, each reviewed and committed:
+**All 11 tasks are complete**, each reviewed and committed:
 
 - Prompt detection in any comment syntax (`//`, `#`, `;;`, `--`), case-insensitive,
   multi-line prompts, finding the **nearest** prompt at or above point.
@@ -91,19 +91,30 @@ Tasks 1–9 of 11 are complete, each reviewed and committed:
 - Guards: one request in flight per buffer, and a response is discarded if you
   changed the buffer while it was in flight.
 
-## What is not done yet
+- Session rolling: `M-x metal-butt-roll-session` writes a self-handoff note and
+  starts a fresh generation seeded from it, and you get a mode-line nudge once a
+  response reports a large input-token count. Rolling is never automatic — it
+  costs a full-context call, so it waits for you to ask.
+- Terminal-side handoff: `/handoff` and `/sync` slash commands under
+  `.claude/commands/`.
 
-- **Task 10 — session rolling.** `M-x metal-butt-roll-session` and the
-  `metal-butt-roll-threshold` warning do not exist yet, so a long-lived buffer
-  session's context will grow unbounded. Watch the cost in the mode line.
-- **Task 11 — terminal-side handoff.** The `/handoff` and `/sync` slash commands
-  are not written, so the Emacs side can read handoff files but nothing writes
-  them from the terminal yet. `README.md` also lands in this task.
+## What has never been run
+
+**No part of this has made a real API call in a real editor.** The suite is
+comprehensive but everything is stubbed, so the first genuine `C-c b` is yours to
+press. That is the one thing I could not do for you overnight, and it is where
+surprises will surface — most likely in how well the model sticks to the JSON
+response contract in practice.
+
+If the response comes back as prose rather than JSON, you will see a
+"does not match the contract" message rather than a mangled buffer. That is the
+design working, but it would mean the contract wording in
+`metal-butt-transport-contract` needs tightening.
 
 ## Tests
 
 ```sh
-make check      # 84 tests, zero API calls, costs nothing
+make check      # 91 tests, zero API calls, costs nothing
 make compile    # byte-compile, warnings are errors
 ```
 
