@@ -187,11 +187,21 @@ prompt located in the buffer also carries :start and :end markers."
 (defvar metal-butt--ask-history nil
   "Prompts previously entered with `metal-butt-ask', for M-p recall.")
 
+(defun metal-butt-backend-label ()
+  "Return a short human-readable name for the active backend.
+Used for prompts like `metal-butt-ask''s minibuffer label, so it names
+whichever backend will actually answer instead of always saying Claude."
+  (pcase metal-butt-backend
+    ('copilot "Copilot")
+    ('copilot-api "Copilot (API)")
+    (_ "Claude")))
+
 (defun metal-butt-ask (prompt)
   "Ask PROMPT about this buffer without writing the question into it.
 The answer appears in a separate window; a proposed code edit still arrives
 as an accept/reject overlay.  A leading @model directive works here too."
-  (interactive (list (read-string "Ask Claude: " nil 'metal-butt--ask-history)))
+  (interactive (list (read-string (format "Ask %s: " (metal-butt-backend-label))
+                                  nil 'metal-butt--ask-history)))
   (let ((split (metal-butt-prompt--extract-model prompt)))
     (metal-butt--dispatch (list :text (cdr split)
                                 :model (car split)

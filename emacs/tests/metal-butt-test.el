@@ -188,6 +188,14 @@
       (should-not called)
       (should-not metal-butt--in-flight))))
 
+(ert-deftest metal-butt-backend-label-names-the-active-backend ()
+  (let ((metal-butt-backend 'claude))
+    (should (equal "Claude" (metal-butt-backend-label))))
+  (let ((metal-butt-backend 'copilot))
+    (should (equal "Copilot" (metal-butt-backend-label))))
+  (let ((metal-butt-backend 'copilot-api))
+    (should (equal "Copilot (API)" (metal-butt-backend-label)))))
+
 (ert-deftest metal-butt-ask-shows-a-reply-in-a-window ()
   "The code buffer must not be touched by a question."
   (metal-butt-test--in-repo
