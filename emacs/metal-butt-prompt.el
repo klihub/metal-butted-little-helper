@@ -12,9 +12,12 @@
   :group 'tools
   :prefix "metal-butt-")
 
-(defcustom metal-butt-attention-word "claude"
-  "Word that marks a comment as a prompt for Claude."
-  :type 'string
+(defcustom metal-butt-attention-words '("claude")
+  "Words that mark a comment as a prompt.
+Every word behaves identically — they are aliases, not modes.  A prompt is
+recognised as the comment starter, optional whitespace, one of these words,
+then a colon."
+  :type '(repeat string)
   :group 'metal-butt)
 
 (defcustom metal-butt-prompt-search-limit 20
@@ -29,10 +32,16 @@ by accident."
   "Matches indentation (group 1) and comment punctuation (group 2).")
 
 (defun metal-butt-prompt--attention-rx ()
-  "Regexp matching a line that opens a prompt block."
-  (concat metal-butt-prompt--comment-rx
-          (regexp-quote metal-butt-attention-word)
-          ":[[:space:]]*"))
+  "Regexp matching a line that opens a prompt block, or nil if none can.
+Returns nil when `metal-butt-attention-words' is empty.  That case must be
+handled explicitly, because `regexp-opt' of no strings matches the empty
+string, which would make every comment line in the buffer a prompt.
+`regexp-opt' also produces shy groups, so the numbered groups in
+`metal-butt-prompt--comment-rx' keep their positions."
+  (when metal-butt-attention-words
+    (concat metal-butt-prompt--comment-rx
+            (regexp-opt metal-butt-attention-words)
+            ":[[:space:]]*")))
 
 (defun metal-butt-prompt--line-indent ()
   "Return indentation string of the current line, or nil if not a comment line."
@@ -43,22 +52,26 @@ by accident."
 
 (defun metal-butt-prompt--attention-line-p ()
   "Non-nil if the current line opens a prompt block."
-  (save-excursion
-    (beginning-of-line)
-    (let ((case-fold-search t))
-      (looking-at (metal-butt-prompt--attention-rx)))))
+  (let ((rx (metal-butt-prompt--attention-rx)))
+    (and rx
+         (save-excursion
+           (beginning-of-line)
+           (let ((case-fold-search t))
+             (and (looking-at rx) t))))))
 
 (defun metal-butt-prompt--strip-line ()
-  "Return the current line's text with comment punctuation removed."
+  "Return the current line's text with comment punctuation removed.
+Returns the empty string when the line is not a comment line at all."
   (save-excursion
     (beginning-of-line)
     (let ((case-fold-search t)
-          (attention-rx (metal-butt-prompt--attention-rx)))
-      (if (looking-at attention-rx)
-          (buffer-substring-no-properties (match-end 0) (line-end-position))
-        (if (looking-at metal-butt-prompt--comment-rx)
-            (buffer-substring-no-properties (match-end 0) (line-end-position))
-          "")))))
+          (rx (metal-butt-prompt--attention-rx)))
+      (cond
+       ((and rx (looking-at rx))
+        (buffer-substring-no-properties (match-end 0) (line-end-position)))
+       ((looking-at metal-butt-prompt--comment-rx)
+        (buffer-substring-no-properties (match-end 0) (line-end-position)))
+       (t "")))))
 
 (defun metal-butt-prompt--find-attention-line ()
   "Move point to the attention line of the nearest prompt block at or above point.

@@ -92,3 +92,30 @@
       "// claude: the far one\nint a = 1;\n// claude: the near one\nint b = 2;\n|\n"
     (should (equal (plist-get (metal-butt-prompt-at-point) :text)
                    "the near one"))))
+
+(ert-deftest metal-butt-prompt-matches-any-configured-word ()
+  (let ((metal-butt-attention-words '("claude" "cc" "ai")))
+    (dolist (word '("claude" "cc" "ai"))
+      (metal-butt-test--with-buffer #'prog-mode
+          (format "// %s: do the thing|\n" word)
+        (should (equal (plist-get (metal-butt-prompt-at-point) :text)
+                       "do the thing"))))))
+
+(ert-deftest metal-butt-prompt-ignores-unconfigured-words ()
+  (let ((metal-butt-attention-words '("claude")))
+    (metal-butt-test--with-buffer #'prog-mode
+        "// cc: not configured|\n"
+      (should-not (metal-butt-prompt-at-point)))))
+
+(ert-deftest metal-butt-prompt-aliases-are-case-insensitive ()
+  (let ((metal-butt-attention-words '("cc")))
+    (metal-butt-test--with-buffer #'prog-mode
+        "// CC: shout|\n"
+      (should (equal (plist-get (metal-butt-prompt-at-point) :text) "shout")))))
+
+(ert-deftest metal-butt-prompt-empty-word-list-matches-nothing ()
+  "An empty list must not turn every comment line into a prompt."
+  (let ((metal-butt-attention-words nil))
+    (metal-butt-test--with-buffer #'prog-mode
+        "// claude: would normally match|\n"
+      (should-not (metal-butt-prompt-at-point)))))

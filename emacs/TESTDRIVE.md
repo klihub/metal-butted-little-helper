@@ -185,10 +185,10 @@ A near-miss shows up as "no match for: …", which is the guard working.
 
 ## Open questions, parked
 
-- **The attention word.** `metal-butt-attention-word` exists and defaults to
-  `"claude"`, but the design was never revisited: whether one word is right, how
-  to avoid firing on ordinary prose that happens to mention Claude, and whether
-  it should differ per major mode. Raised 2026-09-18, deliberately deferred.
+- **Per-word behaviour.** `metal-butt-attention-words` now takes a list of
+  interchangeable aliases, but words still carry no meaning of their own —
+  there is no way to say "answer, never edit". Deliberately deferred until real
+  use shows which distinctions are actually wanted.
 
 ## Tests
 

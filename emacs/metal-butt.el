@@ -93,7 +93,7 @@ discarded response does not consume pending handoff context."
   (save-excursion
     (let ((prompt (or (metal-butt-prompt-at-point)
                       (error "Metal Butt: no `%s:' comment block at point"
-                             metal-butt-attention-word)))
+                             (mapconcat #'identity metal-butt-attention-words "/"))))
           (root (metal-butt-repo-root)))
       (let* ((handoff (metal-butt-handoff-peek root 'to-emacs))
              (request (metal-butt-context-build (plist-get prompt :text)
