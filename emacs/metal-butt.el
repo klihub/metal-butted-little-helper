@@ -82,13 +82,17 @@ symlink and its target, say — do not hash to two different session ids."
     (file-truename root)))
 
 (defun metal-butt--show-reply (text)
-  "Show TEXT in the reply window, leaving the code buffer untouched."
+  "Show TEXT in the reply window, leaving the code buffer untouched.
+Uses `visual-line-mode' so long lines wrap at the window edge instead of
+running off it -- the model's replies are plain prose/markdown, not code,
+so soft-wrapping is what a reader actually wants here."
   (let ((buffer (get-buffer-create "*metal-butt-reply*")))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert text)
         (goto-char (point-min)))
+      (visual-line-mode 1)
       (view-mode 1))
     (display-buffer buffer)))
 

@@ -251,6 +251,13 @@
       (should (with-current-buffer "*metal-butt-reply*"
                 (string-match-p "late but shown" (buffer-string)))))))
 
+(ert-deftest metal-butt-show-reply-wraps-long-lines ()
+  "Replies are prose, not code; without visual-line-mode a long answer runs
+off the window edge instead of wrapping, which is what prompted this test."
+  (metal-butt--show-reply "some reply text")
+  (should (with-current-buffer "*metal-butt-reply*"
+            visual-line-mode)))
+
 (ert-deftest metal-butt-mode-binds-every-command ()
   "Bindings live at top level so a reload installs them; guard all five."
   (dolist (pair '(("C-c b" . metal-butt-send-prompt)
