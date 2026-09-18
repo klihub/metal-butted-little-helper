@@ -76,3 +76,57 @@
     (metal-butt-accept)
     (should (equal (buffer-string) "1\ntwo\n3\n"))
     (should-not (metal-butt-overlay-pending-p))))
+
+(ert-deftest metal-butt-overlay-defaults-to-full-style ()
+  (let ((metal-butt-overlay-diff-style 'full))
+    (with-temp-buffer
+      (insert "alpha\n")
+      (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+      (should (eq (metal-butt-overlay--style) 'full))
+      (should-not (overlay-get metal-butt-overlay--overlay 'display))
+      (should (string-match-p "→ ALPHA"
+                              (overlay-get metal-butt-overlay--overlay 'after-string))))))
+
+(ert-deftest metal-butt-overlay-honours-diff-style-default ()
+  (let ((metal-butt-overlay-diff-style 'diff))
+    (with-temp-buffer
+      (insert "alpha\n")
+      (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+      (should (eq (metal-butt-overlay--style) 'diff))
+      (should (overlay-get metal-butt-overlay--overlay 'display))
+      (should (string-match-p "\\+ALPHA"
+                              (overlay-get metal-butt-overlay--overlay 'after-string))))))
+
+(ert-deftest metal-butt-overlay-toggle-style-switches-live ()
+  (let ((metal-butt-overlay-diff-style 'full))
+    (with-temp-buffer
+      (insert "alpha\n")
+      (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+      (metal-butt-overlay-toggle-style)
+      (should (eq (metal-butt-overlay--style) 'diff))
+      (should (overlay-get metal-butt-overlay--overlay 'display))
+      (metal-butt-overlay-toggle-style)
+      (should (eq (metal-butt-overlay--style) 'full))
+      (should-not (overlay-get metal-butt-overlay--overlay 'display)))))
+
+(ert-deftest metal-butt-overlay-toggle-style-does-not-touch-the-buffer ()
+  (with-temp-buffer
+    (insert "alpha\n")
+    (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+    (metal-butt-overlay-toggle-style)
+    (should (equal (buffer-string) "alpha\n"))))
+
+(ert-deftest metal-butt-overlay-toggle-style-errors-without-a-proposal ()
+  (with-temp-buffer
+    (should-error (metal-butt-overlay-toggle-style))))
+
+(ert-deftest metal-butt-overlay-toggle-style-resets-for-the-next-edit ()
+  "A one-off toggle on edit 1 must not leak onto edit 2."
+  (let ((metal-butt-overlay-diff-style 'full))
+    (with-temp-buffer
+      (insert "one\ntwo\n")
+      (metal-butt-overlay-propose-all '((:old "one" :new "1") (:old "two" :new "2")))
+      (metal-butt-overlay-toggle-style)
+      (should (eq (metal-butt-overlay--style) 'diff))
+      (metal-butt-accept)
+      (should (eq (metal-butt-overlay--style) 'full)))))

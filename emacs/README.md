@@ -63,6 +63,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c C-p` | Ask a follow-up, continuing the last `C-c p` conversation |
 | `C-c C-a` | Accept the proposed edit |
 | `C-c C-r` | Reject the proposed edit |
+| `C-c C-d` | Toggle the pending edit between full-region and diff-style view |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 
 ## Asking without editing the buffer
@@ -84,6 +85,24 @@ understood as a continuation instead of a fresh, unrelated question. Starting
 a new question with `C-c p` resets the conversation, so the next `C-c C-p`
 follows up on that new question instead of the old one. `metal-butt-ask-followup`
 errors if there is no conversation yet — run `C-c p` first.
+
+## Reviewing a proposed edit: full-region or diff style
+
+A proposed edit is shown one of two ways, controlled by
+`metal-butt-overlay-diff-style`:
+
+- `full` (the default): the matched old text is highlighted in place with the
+  new text appended after it as `→ new`. Compact, and easy to read for a
+  short, single-line edit.
+- `diff`: the old text is struck through and the new text shown on its own
+  line prefixed with `+`, closer to how a unified diff hunk reads. Easier to
+  follow for a multi-line edit, where `full` style's inline arrow can bury
+  the change in a wall of text.
+
+`C-c C-d` (`metal-butt-overlay-toggle-style`) flips the *pending* edit
+between the two views without touching the buffer or changing the default —
+the next edit proposed goes back to whatever `metal-butt-overlay-diff-style`
+says.
 
 ## Choosing a model
 
@@ -259,6 +278,7 @@ costs a full-context call, so the timing is yours to choose.
 | `metal-butt-attention-words` | `'("claude" "mb" "metal-butt" "butty")` | Words that mark a comment as a prompt |
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |
+| `metal-butt-overlay-diff-style` | `'full` | How to render a proposed edit: `'full` (inline highlight + arrow) or `'diff` (struck-through old, `+`-prefixed new) |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
 
