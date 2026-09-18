@@ -24,6 +24,60 @@ denying policy rather than failing vaguely — and it deliberately does **not**
 silently retry on a cheaper model, because a quiet downgrade would change edit
 quality without telling you why.
 
+## Authentication — Emacs may not have your shell's environment
+
+Nothing about authentication is special to this package: it spawns `claude` and
+the CLI authenticates exactly as it does in your terminal. The catch is *whose*
+environment it inherits. `make-process` gives the child Emacs's environment, and
+GUI Emacs started from a desktop launcher or a systemd user session does not
+source `~/.bashrc` or `~/.profile`. So a setup that works perfectly in your
+terminal can fail from a buffer.
+
+On this machine the CLI is authenticated purely through environment variables,
+with nothing on disk to fall back on — there is no `~/.aws/` directory:
+
+| Variable | Why it matters |
+|---|---|
+| `AWS_BEARER_TOKEN_BEDROCK` | the actual credential |
+| `CLAUDE_CODE_USE_BEDROCK` | without it the CLI targets the Anthropic API instead of Bedrock |
+| `AWS_REGION` | which region to reach |
+
+**Check from inside Emacs before blaming the package.** `M-:` and evaluate:
+
+```elisp
+(list (executable-find "claude")
+      (and (getenv "AWS_BEARER_TOKEN_BEDROCK") t)
+      (getenv "CLAUDE_CODE_USE_BEDROCK")
+      (getenv "AWS_REGION"))
+```
+
+A `nil` anywhere is your problem. `claude` lives in `~/.local/bin`, which GUI
+Emacs often omits from `exec-path`.
+
+Fixes, cheapest first:
+
+1. **Launch Emacs from a shell that already has the variables** — `emacs &` from
+   your terminal. Nothing to install, and it is the fastest way to confirm the
+   package itself works.
+2. **Install `exec-path-from-shell`** and call `(exec-path-from-shell-initialize)`
+   in your init. This is the durable fix for GUI Emacs. Note it is a dependency of
+   *your config*, not of this package — Metal Butt itself still needs no external
+   packages.
+3. **Set `metal-butt-executable` to the absolute path** (`"/home/kli/.local/bin/claude"`).
+   This solves only the PATH half, not the credential half.
+
+**Do not paste the bearer token into your init file** if that file is version
+controlled or shared. Prefer options 1 or 2, or read it from a mode-600 file.
+
+Two further consequences worth knowing:
+
+- **There is no TTY.** The child runs on a pipe, so the CLI cannot prompt you for
+  anything interactively. If the token has expired, re-authenticate in a terminal
+  first; from a buffer you will just get an auth error.
+- **Bearer tokens expire.** When yours does, this will surface as an
+  authentication failure mid-session rather than at startup, and the message will
+  name the model and the failure rather than being vague about it.
+
 ## Install
 
 ```elisp

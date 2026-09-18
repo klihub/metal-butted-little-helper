@@ -16,10 +16,33 @@ the source of truth, so unsaved changes are safe.
 ## Requirements
 
 - Emacs 30.1+
-- The `claude` CLI on `PATH`
+- The `claude` CLI on `exec-path`, authenticated
 - A git repository (state lives under `<repo-root>/.claude/metal-butt/`)
 
 No external Elisp packages.
+
+### Emacs must be able to see your CLI and its credentials
+
+Authentication is not special here — the spawned `claude` authenticates exactly as
+it does in your terminal. But it inherits **Emacs's** environment, and GUI Emacs
+started from a desktop launcher does not source your shell's rc files. A setup
+that works in a terminal can still fail from a buffer, either because `claude` is
+not on `exec-path` or because the credential variables are absent.
+
+Check with `M-:`:
+
+```elisp
+(list (executable-find "claude")
+      (getenv "CLAUDE_CODE_USE_BEDROCK")   ; if you authenticate via Bedrock
+      (getenv "AWS_REGION"))
+```
+
+If anything is `nil`, either start Emacs from a shell that has the environment,
+use `exec-path-from-shell`, or set `metal-butt-executable` to an absolute path.
+Avoid putting a credential in a version-controlled init file.
+
+The child process has no TTY, so the CLI cannot prompt interactively — if your
+credentials have expired, refresh them in a terminal first.
 
 ## Install
 
