@@ -86,7 +86,7 @@ looking like a hang.
 ## Install
 
 ```elisp
-(add-to-list 'load-path "/u/src/kli/santas-metal-butted-little-helpers")
+(add-to-list 'load-path "/u/src/kli/santas-metal-butted-little-helpers/emacs")
 (require 'metal-butt)
 (add-hook 'prog-mode-hook #'metal-butt-mode)
 ```
@@ -94,7 +94,7 @@ looking like a hang.
 Or, to try it without touching your config:
 
 ```sh
-cd /u/src/kli/santas-metal-butted-little-helpers
+cd /u/src/kli/santas-metal-butted-little-helpers/emacs
 emacs -Q -L . -l metal-butt.el
 ```
 

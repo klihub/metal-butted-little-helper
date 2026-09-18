@@ -1,3 +1,8 @@
 *.elc
 .claude/metal-butt/
 .superpowers/
+
+# Emacs autosave and lock files
+*~
+\#*\#
+.\#*

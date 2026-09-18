@@ -47,7 +47,7 @@ credentials have expired, refresh them in a terminal first.
 ## Install
 
 ```elisp
-(add-to-list 'load-path "/path/to/santas-metal-butted-little-helpers")
+(add-to-list 'load-path "/path/to/santas-metal-butted-little-helpers/emacs")
 (require 'metal-butt)
 (add-hook 'prog-mode-hook #'metal-butt-mode)
 ```
