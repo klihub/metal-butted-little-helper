@@ -218,6 +218,34 @@ discarded along with the process buffers."
         (view-mode 1))
       (display-buffer "*metal-butt-last-exchange*"))))
 
+(defconst metal-butt--modules
+  '("metal-butt-prompt"
+    "metal-butt-context"
+    "metal-butt-transport"
+    "metal-butt-response"
+    "metal-butt-overlay"
+    "metal-butt-comment"
+    "metal-butt-session"
+    "metal-butt-handoff"
+    "metal-butt")
+  "Every file of the package, entry point last.
+`metal-butt-reload' walks this list, so a new module added to the package
+must be added here too or it will be left stale by a reload.")
+
+(defun metal-butt-reload ()
+  "Reload every module of the package.
+`require' is a no-op once a feature is loaded, so reloading only `metal-butt'
+leaves the other modules at whatever version the session started with.  That
+mixed state usually announces itself as a void function for something added
+to another module since.  This force-loads all of them instead.
+
+A request already in flight is not cancelled; its callback belongs to the
+code that was loaded when it started."
+  (interactive)
+  (dolist (module metal-butt--modules)
+    (load module nil t))
+  (message "Metal Butt: reloaded %d modules" (length metal-butt--modules)))
+
 (defvar metal-butt-mode-map (make-sparse-keymap)
   "Keymap for `metal-butt-mode'.
 Bindings are installed below rather than in this initialiser.  `defvar' only

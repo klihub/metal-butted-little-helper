@@ -248,3 +248,21 @@
   (should (eq (lookup-key metal-butt-mode-map (kbd "C-c z")) #'ignore))
   (should (eq (lookup-key metal-butt-mode-map (kbd "C-c p")) #'metal-butt-ask))
   (define-key metal-butt-mode-map (kbd "C-c z") nil))
+
+(ert-deftest metal-butt-reload-refreshes-every-module ()
+  "Reloading only the entry point leaves the other modules stale."
+  (should (equal (car (last metal-butt--modules)) "metal-butt"))
+  (dolist (m metal-butt--modules)
+    (should (locate-library m)))
+  (metal-butt-reload)
+  (should (fboundp 'metal-butt-prompt--extract-model))
+  (should (fboundp 'metal-butt-handoff-peek))
+  (should (fboundp 'metal-butt-response--escape-raw-controls)))
+
+(ert-deftest metal-butt-reload-list-covers-every-file ()
+  "A module added without listing it would be left stale by every reload."
+  (let* ((dir (file-name-directory (locate-library "metal-butt")))
+         (on-disk (sort (mapcar #'file-name-base
+                                (directory-files dir nil "\\`metal-butt.*\\.el\\'"))
+                        #'string<)))
+    (should (equal on-disk (sort (copy-sequence metal-butt--modules) #'string<)))))
