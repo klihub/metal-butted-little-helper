@@ -13,6 +13,7 @@
 (require 'seq)
 (require 'metal-butt-response)
 (require 'metal-butt-transport-copilot)
+(require 'metal-butt-transport-copilot-api)
 
 (define-error 'metal-butt-transport-error "Claude CLI transport failed")
 
@@ -25,8 +26,16 @@ different model name spellings (\"sonnet\" versus \"claude-sonnet-5\", for
 instance), so that variable needs a value appropriate to whichever backend
 is active."
   :type '(choice (const :tag "Claude Code (claude)" claude)
-                 (const :tag "GitHub Copilot CLI (copilot)" copilot))
+                 (const :tag "GitHub Copilot CLI (copilot)" copilot)
+                 (const :tag "GitHub Copilot chat API directly (copilot-api)" copilot-api))
   :group 'metal-butt)
+
+(defun metal-butt-backend-copilot-family-p ()
+  "Return non-nil if the active backend is either Copilot variant.
+`copilot' and `copilot-api' share the same model catalogue and
+mode-line/cost display, differing only in how the request actually
+reaches Copilot -- see `metal-butt-transport-send' for that dispatch."
+  (memq metal-butt-backend '(copilot copilot-api)))
 
 (defcustom metal-butt-executable "claude"
   "Name or path of the Claude Code CLI."
@@ -58,9 +67,9 @@ model name spellings (\"sonnet\" versus \"claude-sonnet-5\", for instance)."
 
 (defun metal-butt-default-model ()
   "Return the active backend's default model.
-`metal-butt-copilot-model' for `copilot', `metal-butt-claude-model'
-otherwise."
-  (if (eq metal-butt-backend 'copilot)
+`metal-butt-copilot-model' for `copilot'/`copilot-api',
+`metal-butt-claude-model' otherwise."
+  (if (metal-butt-backend-copilot-family-p)
       metal-butt-copilot-model
     metal-butt-claude-model))
 
@@ -85,7 +94,7 @@ is not enforced the way this one is."
 
 (defun metal-butt-active-known-models ()
   "Return the model names offered for completion by the active backend."
-  (if (eq metal-butt-backend 'copilot)
+  (if (metal-butt-backend-copilot-family-p)
       metal-butt-copilot-known-models
     metal-butt-known-models))
 
@@ -95,7 +104,7 @@ The Claude backend enforces membership in `metal-butt-known-models',
 because a typo there becomes an API call that can take a minute to be
 refused.  The Copilot backend does not: see
 `metal-butt-copilot-check-model' for why."
-  (if (eq metal-butt-backend 'copilot)
+  (if (metal-butt-backend-copilot-family-p)
       (metal-butt-copilot-check-model model)
     (unless (member model metal-butt-known-models)
       (error "Metal Butt: unknown model %S; known models are %s"
@@ -270,14 +279,17 @@ Called as (FN REQUEST SESSION-ID CALLBACK).  Rebind in tests.")
 (defun metal-butt-transport-send (request session-id callback)
   "Send REQUEST for SESSION-ID via the backend named by `metal-butt-backend'.
 The Claude backend goes through `metal-butt-transport-function', the
-injectable seam tests rebind.  The Copilot backend has its own analogous
-seam, `metal-butt-transport-copilot-function', reached via
-`metal-butt-transport-copilot-send' instead — the two backends' argv,
-wire format and error shapes differ enough that sharing one seam would
-mean every stub had to pretend to be both at once."
-  (if (eq metal-butt-backend 'copilot)
-      (metal-butt-transport-copilot-send request session-id callback)
-    (funcall metal-butt-transport-function request session-id callback)))
+injectable seam tests rebind.  The Copilot CLI backend has its own
+analogous seam, `metal-butt-transport-copilot-function', reached via
+`metal-butt-transport-copilot-send'.  The direct-API Copilot backend has
+a third, `metal-butt-transport-copilot-api-function', reached via
+`metal-butt-transport-copilot-api-send' — three backends' argv, wire
+format and error shapes differ enough that sharing one seam would mean
+every stub had to pretend to be all three at once."
+  (pcase metal-butt-backend
+    ('copilot (metal-butt-transport-copilot-send request session-id callback))
+    ('copilot-api (metal-butt-transport-copilot-api-send request session-id callback))
+    (_ (funcall metal-butt-transport-function request session-id callback))))
 
 (provide 'metal-butt-transport)
 ;;; metal-butt-transport.el ends here

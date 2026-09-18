@@ -197,8 +197,22 @@ failure it exists to prevent."
     (should-not claude-called)
     (should (equal copilot-called '("req" "sid")))))
 
+(ert-deftest metal-butt-transport-send-dispatches-to-copilot-api-when-configured ()
+  (let* ((metal-butt-backend 'copilot-api)
+         (claude-called nil)
+         (copilot-api-called nil)
+         (metal-butt-transport-function
+          (lambda (&rest _) (setq claude-called t)))
+         (metal-butt-transport-copilot-api-function
+          (lambda (req sid cb) (setq copilot-api-called (list req sid)) (funcall cb nil nil))))
+    (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil))
+    (should-not claude-called)
+    (should (equal copilot-api-called '("req" "sid")))))
+
 (ert-deftest metal-butt-check-model-dispatches-per-backend ()
   (let ((metal-butt-backend 'claude))
     (should-error (metal-butt-check-model "not-a-claude-model")))
   (let ((metal-butt-backend 'copilot))
+    (should (equal "anything-nonempty" (metal-butt-check-model "anything-nonempty"))))
+  (let ((metal-butt-backend 'copilot-api))
     (should (equal "anything-nonempty" (metal-butt-check-model "anything-nonempty")))))

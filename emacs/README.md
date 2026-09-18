@@ -92,14 +92,51 @@ mode line shows which model is active.
 
 ## Backends
 
-`metal-butt-backend` selects which CLI does the work: `'claude` (the default)
-or `'copilot`. Both speak the same JSON contract described above, so overlays,
-comment replies, sessions and handoff files behave identically either way —
-only the transport underneath differs.
+`metal-butt-backend` selects which CLI (or API) does the work: `'claude` (the
+default), `'copilot`, or `'copilot-api`. All three speak the same JSON contract
+described above, so overlays, comment replies, sessions and handoff files
+behave identically either way — only the transport underneath differs.
 
 ```elisp
 (setq metal-butt-backend 'copilot)
 ```
+
+### `copilot-api`: talking to Copilot directly, without the CLI
+
+The `copilot` CLI backend pays a large, mostly fixed per-invocation cost on
+every non-interactive call — process startup, an update check, MCP server
+discovery, tool schema loading — none of which buys anything here, since
+metal-butt never lets the CLI use tools (`write` and `shell` are always
+denied) and never relies on its session/context management (the whole buffer
+is resent every call regardless of backend). Measured: ~7-8s wall time per
+call, most of it before the model is even reached.
+
+`metal-butt-backend` set to `'copilot-api` skips the CLI entirely and calls
+GitHub's `chat/completions` endpoint directly over HTTPS, the same endpoint
+the [`copilot-chat`](https://github.com/chep/copilot-chat.el) Emacs package
+uses. Measured end-to-end latency: ~1-2s, a several-fold improvement, since
+only the model call itself remains.
+
+This backend has one prerequisite: it reuses the GitHub OAuth token already
+cached by `copilot-chat` at `metal-butt-copilot-api-github-token-file`
+(default `~/.config/copilot-chat/github-token`) rather than performing its
+own login. Install `copilot-chat` and log in once (`M-x copilot-chat-login`
+or equivalent), and this backend will pick up that token — there is no
+separate login flow here. If that file does not exist, requests fail with an
+error explaining exactly this.
+
+```elisp
+(setq metal-butt-backend 'copilot-api)
+```
+
+The trade-off: this backend has no CLI-side session, so `--session-id`/resume
+does not apply to it (a non-issue in practice, since the whole buffer is
+already resent every call), and it is a second, independent path to
+Copilot's API that could break if GitHub changes the endpoint's shape —
+whereas the `copilot` CLI backend is a supported, stable interface. Use
+`copilot` if you want the officially supported path; use `copilot-api` if you
+want the same model with much lower latency and are fine depending on an
+undocumented endpoint copilot-chat already relies on.
 
 A few differences follow from the CLIs themselves, not from any choice made
 here:
@@ -175,24 +212,28 @@ up mid-session.
 With the `claude` backend, the mode line shows what each prompt cost in
 dollars. With the `copilot` backend, there is no dollar figure in the CLI's
 output, so the mode line instead shows the accumulated premium-request count
-for the last call (for example `2pr`). Either way, when a session's context
-gets large, `M-x metal-butt-roll-session` summarises it into a handoff note
-and starts a fresh session. Rolling is never automatic — it costs a
-full-context call, so the timing is yours to choose.
+for the last call (for example `2pr`). With `copilot-api`, the
+`chat/completions` response has neither figure, so the mode line shows ` api`
+instead as a reminder of which backend answered. Either way, when a session's
+context gets large, `M-x metal-butt-roll-session` summarises it into a
+handoff note and starts a fresh session. Rolling is never automatic — it
+costs a full-context call, so the timing is yours to choose.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `metal-butt-backend` | `'claude` | Which CLI to use: `'claude` or `'copilot` |
+| `metal-butt-backend` | `'claude` | Which backend to use: `'claude`, `'copilot`, or `'copilot-api` |
 | `metal-butt-executable` | `"claude"` | Name or path of the Claude Code CLI |
 | `metal-butt-copilot-executable` | `"copilot"` | Name or path of the Copilot CLI |
+| `metal-butt-copilot-api-github-token-file` | `"~/.config/copilot-chat/github-token"` | GitHub token file reused from `copilot-chat`, for `'copilot-api` |
+| `metal-butt-copilot-api-curl-program` | `"curl"` | Curl program used to reach the Copilot API directly |
 | `metal-butt-model` | `nil` | Explicit model override, regardless of backend; leave `nil` to use the active backend's default |
 | `metal-butt-claude-model` | `"sonnet"` | Default model when `metal-butt-backend` is `'claude` |
-| `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` |
+| `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` or `'copilot-api` |
 | `metal-butt-known-models` | `'("haiku" "sonnet" "opus" "fable")` | Accepted model names for `claude` |
-| `metal-butt-copilot-known-models` | see source | Model names offered for completion for `copilot` (not enforced) |
-| `metal-butt-copilot-deny-tools` | `'("write" "shell")` | Tool categories denied to the Copilot backend |
+| `metal-butt-copilot-known-models` | see source | Model names offered for completion for `copilot`/`copilot-api` (not enforced) |
+| `metal-butt-copilot-deny-tools` | `'("write" "shell")` | Tool categories denied to the Copilot CLI backend |
 | `metal-butt-request-timeout` | `60` | Seconds before a request is abandoned |
 | `metal-butt-attention-words` | `'("claude" "mb" "metal-butt" "butty")` | Words that mark a comment as a prompt |
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |

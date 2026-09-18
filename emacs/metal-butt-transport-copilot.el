@@ -46,6 +46,9 @@
 (require 'json)
 (require 'metal-butt-response)
 
+(defvar metal-butt-request-timeout)
+(declare-function metal-butt-active-model "metal-butt-transport")
+
 (define-error 'metal-butt-copilot-transport-error "Copilot CLI transport failed")
 
 (defcustom metal-butt-copilot-executable "copilot"

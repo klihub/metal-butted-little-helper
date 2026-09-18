@@ -207,11 +207,13 @@ as an accept/reject overlay.  A leading @model directive works here too."
 The place to look when a response fails to parse: the payload is otherwise
 discarded along with the process buffers.  Shows whichever backend is
 active's record: `metal-butt-transport-last-exchange' for `claude',
-`metal-butt-transport-copilot-last-exchange' for `copilot'."
+`metal-butt-transport-copilot-last-exchange' for `copilot',
+`metal-butt-transport-copilot-api-last-exchange' for `copilot-api'."
   (interactive)
-  (let ((exchange (if (eq metal-butt-backend 'copilot)
-                      metal-butt-transport-copilot-last-exchange
-                    metal-butt-transport-last-exchange)))
+  (let ((exchange (pcase metal-butt-backend
+                    ('copilot metal-butt-transport-copilot-last-exchange)
+                    ('copilot-api metal-butt-transport-copilot-api-last-exchange)
+                    (_ metal-butt-transport-last-exchange))))
     (if (null exchange)
         (message "Metal Butt: no exchange recorded yet")
       (with-current-buffer (get-buffer-create "*metal-butt-last-exchange*")
@@ -240,6 +242,7 @@ active's record: `metal-butt-transport-last-exchange' for `claude',
     "metal-butt-context"
     "metal-butt-response"
     "metal-butt-transport-copilot"
+    "metal-butt-transport-copilot-api"
     "metal-butt-transport"
     "metal-butt-overlay"
     "metal-butt-comment"
@@ -289,6 +292,7 @@ yourself.")
                             (if (> metal-butt--last-premium-requests 0)
                                 (format " %dpr" metal-butt--last-premium-requests)
                               ""))
+                           ((eq metal-butt-backend 'copilot-api) " api")
                            ((> metal-butt--last-cost 0)
                             (format " $%.4f" metal-butt--last-cost))
                            (t ""))))
