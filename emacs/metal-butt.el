@@ -218,15 +218,20 @@ discarded along with the process buffers."
         (view-mode 1))
       (display-buffer "*metal-butt-last-exchange*"))))
 
-(defvar metal-butt-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c b") #'metal-butt-send-prompt)
-    (define-key map (kbd "C-c p") #'metal-butt-ask)
-    (define-key map (kbd "C-c C-a") #'metal-butt-accept)
-    (define-key map (kbd "C-c C-r") #'metal-butt-reject)
-    (define-key map (kbd "C-c m") #'metal-butt-set-model)
-    map)
-  "Keymap for `metal-butt-mode'.")
+(defvar metal-butt-mode-map (make-sparse-keymap)
+  "Keymap for `metal-butt-mode'.
+Bindings are installed below rather than in this initialiser.  `defvar' only
+assigns when the variable is unbound, so bindings written here would never
+appear in an Emacs that had already loaded the package once — reloading after
+adding a key would silently do nothing.  Installing them at top level means a
+reload applies them, while the `defvar' still protects keys you have added
+yourself.")
+
+(define-key metal-butt-mode-map (kbd "C-c b") #'metal-butt-send-prompt)
+(define-key metal-butt-mode-map (kbd "C-c p") #'metal-butt-ask)
+(define-key metal-butt-mode-map (kbd "C-c C-a") #'metal-butt-accept)
+(define-key metal-butt-mode-map (kbd "C-c C-r") #'metal-butt-reject)
+(define-key metal-butt-mode-map (kbd "C-c m") #'metal-butt-set-model)
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode

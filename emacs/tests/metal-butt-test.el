@@ -231,3 +231,20 @@
                nil)
       (should (with-current-buffer "*metal-butt-reply*"
                 (string-match-p "late but shown" (buffer-string)))))))
+
+(ert-deftest metal-butt-mode-binds-every-command ()
+  "Bindings live at top level so a reload installs them; guard all five."
+  (dolist (pair '(("C-c b" . metal-butt-send-prompt)
+                  ("C-c p" . metal-butt-ask)
+                  ("C-c C-a" . metal-butt-accept)
+                  ("C-c C-r" . metal-butt-reject)
+                  ("C-c m" . metal-butt-set-model)))
+    (should (eq (lookup-key metal-butt-mode-map (kbd (car pair))) (cdr pair)))))
+
+(ert-deftest metal-butt-mode-map-survives-a-reload ()
+  "Reloading must not wipe a key the user added, and must install ours."
+  (define-key metal-butt-mode-map (kbd "C-c z") #'ignore)
+  (load "metal-butt")
+  (should (eq (lookup-key metal-butt-mode-map (kbd "C-c z")) #'ignore))
+  (should (eq (lookup-key metal-butt-mode-map (kbd "C-c p")) #'metal-butt-ask))
+  (define-key metal-butt-mode-map (kbd "C-c z") nil))
