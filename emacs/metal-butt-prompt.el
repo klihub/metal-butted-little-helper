@@ -59,6 +59,19 @@ string, which would make every comment line in the buffer a prompt.
            (let ((case-fold-search t))
              (and (looking-at rx) t))))))
 
+(defconst metal-butt-prompt--model-rx
+  "\\`@\\([A-Za-z0-9._-]+\\)\\(?:[ \t]*\n\\|[ \t]+\\|\\'\\)"
+  "Matches an @model directive at the very start of a prompt.")
+
+(defun metal-butt-prompt--extract-model (text)
+  "Split a leading @model directive off TEXT.
+Return (MODEL . REST); MODEL is nil when there is no directive.  Only a
+directive at the very start counts, so an @ anywhere else in the prompt
+stays ordinary text."
+  (if (string-match metal-butt-prompt--model-rx text)
+      (cons (match-string 1 text) (substring text (match-end 0)))
+    (cons nil text)))
+
 (defun metal-butt-prompt--strip-line ()
   "Return the current line's text with comment punctuation removed.
 Returns the empty string when the line is not a comment line at all."
@@ -101,9 +114,12 @@ The value is a plist (:text STRING :start MARKER :end MARKER)."
                     (not (metal-butt-prompt--attention-line-p)))
           (push (metal-butt-prompt--strip-line) lines)
           (forward-line 1))
-        (list :text (string-join (nreverse lines) "\n")
-              :start start
-              :end (copy-marker (point)))))))
+        (let ((split (metal-butt-prompt--extract-model
+                      (string-join (nreverse lines) "\n"))))
+          (list :text (cdr split)
+                :model (car split)
+                :start start
+                :end (copy-marker (point))))))))
 
 (provide 'metal-butt-prompt)
 ;;; metal-butt-prompt.el ends here

@@ -136,3 +136,21 @@ match text in the user's buffer, so the instruction would cause the very
 failure it exists to prevent."
   (should (string-search "as \\n;" metal-butt-transport-contract))
   (should-not (string-search "as \\\\n;" metal-butt-transport-contract)))
+
+(ert-deftest metal-butt-transport-rejects-an-unknown-model ()
+  (should-error (metal-butt-check-model "opuss"))
+  (should (equal "opus" (metal-butt-check-model "opus"))))
+
+(ert-deftest metal-butt-transport-retry-keeps-the-model ()
+  "The retry fires from a callback, outside any binding the caller made."
+  (let ((seen nil)
+        (metal-butt-model "haiku"))
+    (cl-letf (((symbol-function 'metal-butt-transport--launch)
+               (lambda (_req _sid create cb)
+                 (push metal-butt-model seen)
+                 (if create
+                     (funcall cb (list :text "{}" :cost 0 :input-tokens 0) nil nil)
+                   (funcall cb nil "No conversation found" t)))))
+      (let ((metal-butt-model "opus"))
+        (metal-butt-transport--run "r" "sid" (lambda (&rest _) nil))))
+    (should (equal seen '("opus" "opus")))))

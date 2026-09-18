@@ -27,6 +27,22 @@ harder to diagnose than an outright error."
   :type 'string
   :group 'metal-butt)
 
+(defcustom metal-butt-known-models '("haiku" "sonnet" "opus" "fable")
+  "Model names accepted from an @model directive or `metal-butt-set-model'.
+Checked locally so a typo fails at once, rather than becoming an API call
+that can take a minute to be refused.  Extend this if you use a model name
+that is not listed."
+  :type '(repeat string)
+  :group 'metal-butt)
+
+(defun metal-butt-check-model (model)
+  "Signal an error unless MODEL is in `metal-butt-known-models'.
+Return MODEL when it is valid."
+  (unless (member model metal-butt-known-models)
+    (error "Metal Butt: unknown model %S; known models are %s"
+           model (mapconcat #'identity metal-butt-known-models ", ")))
+  model)
+
 (defcustom metal-butt-request-timeout 60
   "Seconds to wait for a response before abandoning the request.
 Set to nil or 0 to wait indefinitely.  A bound matters because the CLI
@@ -171,16 +187,22 @@ the process sentinel and the timeout timer fires first wins."
   "Send REQUEST to SESSION-ID, calling CALLBACK with a result plist or an error.
 CALLBACK receives (RESULT-PLIST nil) on success or (nil ERROR-STRING) on
 failure.  Resuming a session id that does not exist yet fails, so that one
-case is retried once with --session-id, which creates it."
-  (metal-butt-transport--launch
-   request session-id nil
-   (lambda (result error retryable)
-     (if (and error retryable)
-         (metal-butt-transport--launch
-          request session-id t
-          (lambda (result2 error2 _retryable2)
-            (funcall callback result2 error2)))
-       (funcall callback result error)))))
+case is retried once with --session-id, which creates it.
+
+The model in effect is captured here and rebound around the retry, because
+the retry fires from inside a callback, outside any dynamic binding the
+caller established around this call."
+  (let ((model metal-butt-model))
+    (metal-butt-transport--launch
+     request session-id nil
+     (lambda (result error retryable)
+       (if (and error retryable)
+           (let ((metal-butt-model model))
+             (metal-butt-transport--launch
+              request session-id t
+              (lambda (result2 error2 _retryable2)
+                (funcall callback result2 error2))))
+         (funcall callback result error))))))
 
 (defvar metal-butt-transport-function #'metal-butt-transport--run
   "Function used to reach Claude.

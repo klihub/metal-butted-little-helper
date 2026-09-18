@@ -59,6 +59,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c b` | Send the `claude:` block at or above point |
 | `C-c C-a` | Accept the proposed edit |
 | `C-c C-r` | Reject the proposed edit |
+| `C-c m` | Set the model (prefix arg: this buffer only) |
 
 `C-c b` rather than `C-c C-c`, which is already `comment-region` in `c-mode`
 and `python-shell-send-buffer` in `python-mode`.
@@ -87,12 +88,27 @@ prefix and pays for a summarisation call, so it is not always cheaper.
 |---|---|---|
 | `metal-butt-executable` | `"claude"` | Name or path of the Claude Code CLI |
 | `metal-butt-model` | `"sonnet"` | Model for buffer prompts |
+| `metal-butt-known-models` | `'("haiku" "sonnet" "opus" "fable")` | Accepted model names |
 | `metal-butt-request-timeout` | `60` | Seconds before a request is abandoned |
 | `metal-butt-attention-words` | `'("claude")` | Words that mark a comment as a prompt |
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
+
+## Choosing a model
+
+Per prompt, with a leading `@` token:
+
+```c
+// claude: @opus redesign this module
+// claude: @haiku what does this do?
+```
+
+Per session, without writing any elisp: `C-c m` (or `M-x metal-butt-set-model`)
+reads a model with completion. A prefix argument sets it for the current buffer
+only. Most specific wins: an `@` token beats the buffer setting, which beats the
+global default. The mode line shows which model is active.
 
 ## Troubleshooting
 

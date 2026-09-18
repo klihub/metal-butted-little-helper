@@ -150,3 +150,29 @@
     (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"ok\"}"
       (metal-butt-send-prompt))
     (should (equal "" (car (metal-butt-handoff-peek root 'to-emacs))))))
+
+(ert-deftest metal-butt-effective-model-precedence ()
+  (with-temp-buffer
+    (let ((metal-butt-model "sonnet"))
+      (should (equal (metal-butt-effective-model) "sonnet"))
+      (setq-local metal-butt--buffer-model "haiku")
+      (should (equal (metal-butt-effective-model) "haiku"))
+      (should (equal (metal-butt-effective-model "opus") "opus")))))
+
+(ert-deftest metal-butt-set-model-buffer-only-leaves-the-global-alone ()
+  (with-temp-buffer
+    (let ((metal-butt-model "sonnet"))
+      (metal-butt-set-model "haiku" t)
+      (should (equal metal-butt--buffer-model "haiku"))
+      (should (equal metal-butt-model "sonnet")))))
+
+(ert-deftest metal-butt-send-rejects-an-unknown-model-without-calling-out ()
+  "A typo must fail before any request is made, and must not wedge the buffer."
+  (metal-butt-test--in-repo
+    (insert "// claude: @opuss do it\n")
+    (let ((called nil))
+      (let ((metal-butt-transport-function
+             (lambda (&rest _) (setq called t))))
+        (should-error (metal-butt-send-prompt)))
+      (should-not called)
+      (should-not metal-butt--in-flight))))

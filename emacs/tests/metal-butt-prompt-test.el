@@ -119,3 +119,32 @@
     (metal-butt-test--with-buffer #'prog-mode
         "// claude: would normally match|\n"
       (should-not (metal-butt-prompt-at-point)))))
+
+(ert-deftest metal-butt-prompt-extracts-a-model-directive ()
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: @opus redesign this|\n"
+    (let ((p (metal-butt-prompt-at-point)))
+      (should (equal (plist-get p :model) "opus"))
+      (should (equal (plist-get p :text) "redesign this")))))
+
+(ert-deftest metal-butt-prompt-without-a-directive-has-no-model ()
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: redesign this|\n"
+    (let ((p (metal-butt-prompt-at-point)))
+      (should-not (plist-get p :model))
+      (should (equal (plist-get p :text) "redesign this")))))
+
+(ert-deftest metal-butt-prompt-at-sign-mid-prompt-is-literal ()
+  "Only a directive at the very start counts."
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: fix @foo in the docs|\n"
+    (let ((p (metal-butt-prompt-at-point)))
+      (should-not (plist-get p :model))
+      (should (equal (plist-get p :text) "fix @foo in the docs")))))
+
+(ert-deftest metal-butt-prompt-directive-alone-on-the-first-line ()
+  (metal-butt-test--with-buffer #'prog-mode
+      "// claude: @haiku\n// and explain briefly|\n"
+    (let ((p (metal-butt-prompt-at-point)))
+      (should (equal (plist-get p :model) "haiku"))
+      (should (equal (plist-get p :text) "and explain briefly")))))

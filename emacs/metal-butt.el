@@ -33,6 +33,36 @@
 (defvar-local metal-butt--last-cost 0)
 (defvar-local metal-butt--last-input-tokens 0)
 
+(defvar-local metal-butt--buffer-model nil
+  "Model for this buffer alone, set by `metal-butt-set-model' with a prefix arg.")
+
+(defun metal-butt-effective-model (&optional prompt-model)
+  "Return the model to use, most specific setting first.
+PROMPT-MODEL comes from an @model directive, then the buffer-local setting
+from `metal-butt-set-model', then the global `metal-butt-model'."
+  (or prompt-model metal-butt--buffer-model metal-butt-model))
+
+(defun metal-butt-set-model (model &optional buffer-only)
+  "Set the model to MODEL, globally, or for this buffer with a prefix arg.
+Reads with completion so no elisp is needed and a typo cannot become a
+wasted API call."
+  (interactive
+   (list (completing-read
+          (format "Model (currently %s): " (metal-butt-effective-model))
+          metal-butt-known-models nil nil)
+         current-prefix-arg))
+  (metal-butt-check-model model)
+  (if buffer-only
+      (setq-local metal-butt--buffer-model model)
+    (setq metal-butt-model model))
+  (force-mode-line-update)
+  (cond
+   (buffer-only (message "Metal Butt: model set to %s for this buffer" model))
+   (metal-butt--buffer-model
+    (message "Metal Butt: model set to %s globally, but this buffer overrides with %s (use C-u to change it here)"
+             model metal-butt--buffer-model))
+   (t (message "Metal Butt: model set to %s globally" model))))
+
 (defun metal-butt-repo-root ()
   "Return the top-level directory of the current repository, fully resolved.
 Resolved with `file-truename' so that two spellings of one directory — a
@@ -103,17 +133,22 @@ discarded response does not consume pending handoff context."
              (ack (lambda ()
                     (unless (string-empty-p (car handoff))
                       (metal-butt-handoff-ack root 'to-emacs (cdr handoff))))))
-        (setq metal-butt--in-flight t)
-        (message "Metal Butt: thinking...")
-        (condition-case err
-            (metal-butt-transport-send
-             request
-             (metal-butt-session-current-id root)
-             (lambda (result error)
-               (metal-butt--handle buffer prompt tick result error ack)))
-          (error
-           (setq metal-butt--in-flight nil)
-           (signal (car err) (cdr err))))))))
+        (when (plist-get prompt :model)
+          (metal-butt-check-model (plist-get prompt :model)))
+        (when (string-match-p "\\`[ \t\n]*\\'" (plist-get prompt :text))
+          (error "Metal Butt: the prompt is empty"))
+        (let ((metal-butt-model (metal-butt-effective-model (plist-get prompt :model))))
+          (setq metal-butt--in-flight t)
+          (message "Metal Butt: thinking...")
+          (condition-case err
+              (metal-butt-transport-send
+               request
+               (metal-butt-session-current-id root)
+               (lambda (result error)
+                 (metal-butt--handle buffer prompt tick result error ack)))
+            (error
+             (setq metal-butt--in-flight nil)
+             (signal (car err) (cdr err)))))))))
 
 (defun metal-butt-roll-session ()
   "Summarise this session into a handoff note and start a fresh generation."
@@ -150,15 +185,18 @@ discarded along with the process buffers."
     (define-key map (kbd "C-c b") #'metal-butt-send-prompt)
     (define-key map (kbd "C-c C-a") #'metal-butt-accept)
     (define-key map (kbd "C-c C-r") #'metal-butt-reject)
+    (define-key map (kbd "C-c m") #'metal-butt-set-model)
     map)
   "Keymap for `metal-butt-mode'.")
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode
   "Prompt Claude from this buffer's comments."
-  :lighter (:eval (if (> metal-butt--last-cost 0)
-                      (format " MB $%.4f" metal-butt--last-cost)
-                    " MB"))
+  :lighter (:eval (format " MB[%s]%s"
+                          (metal-butt-effective-model)
+                          (if (> metal-butt--last-cost 0)
+                              (format " $%.4f" metal-butt--last-cost)
+                            "")))
   :keymap metal-butt-mode-map)
 
 (provide 'metal-butt)
