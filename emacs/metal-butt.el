@@ -37,6 +37,11 @@
 (defvar-local metal-butt--last-cost 0)
 (defvar-local metal-butt--last-input-tokens 0)
 (defvar-local metal-butt--last-premium-requests 0)
+(defvar-local metal-butt--last-prompt nil
+  "The most recent prompt plist passed to `metal-butt--dispatch', for
+`metal-butt-retry' to resend.  Set unconditionally, including on prompts
+that go on to fail, so a retry after an error resends the same prompt
+rather than erroring a second time with nothing to retry.")
 
 (defvar-local metal-butt--buffer-model nil
   "Model for this buffer alone, set by `metal-butt-set-model' with a prefix arg.")
@@ -190,6 +195,7 @@ prompt located in the buffer also carries :start and :end markers."
     (error "Metal Butt: the prompt is empty"))
   (when (plist-get prompt :model)
     (metal-butt-check-model (plist-get prompt :model)))
+  (setq metal-butt--last-prompt prompt)
   (let* ((root (metal-butt-repo-root))
          (handoff (metal-butt-handoff-peek root 'to-emacs))
          (request (metal-butt-context-build (plist-get prompt :text)
@@ -228,7 +234,47 @@ prompt located in the buffer also carries :start and :end markers."
       (metal-butt--dispatch (append prompt (list :reply 'comment))))))
 
 (defvar metal-butt--ask-history nil
-  "Prompts previously entered with `metal-butt-ask', for M-p recall.")
+  "Prompts previously entered with `metal-butt-ask', for M-p recall.
+Persisted to disk by `metal-butt-history-save' so it survives Emacs
+restarts; loaded lazily by `metal-butt-history-load' the first time this
+Emacs session asks a question, so a later buffer's `M-p' can recall
+prompts from a prior Emacs process too.")
+
+(defcustom metal-butt-history-max-entries 200
+  "Maximum number of prompts kept in the persisted `M-p' history file.
+Oldest entries are dropped first once this is exceeded, so the file
+does not grow without bound across a long-lived repo."
+  :type 'integer
+  :group 'metal-butt)
+
+(defun metal-butt--history-file (repo-root)
+  "Return the path of the persisted prompt-history file for REPO-ROOT."
+  (expand-file-name "history" (metal-butt-session-dir repo-root)))
+
+(defun metal-butt-history-load (repo-root)
+  "Load persisted prompt history for REPO-ROOT, once per Emacs session.
+Does nothing if `metal-butt--ask-history' is already populated -- either
+from an earlier `metal-butt-ask' this session, or from an earlier call to
+this function -- so a prompt entered after loading is never clobbered by
+a stale on-disk copy."
+  (let ((file (metal-butt--history-file repo-root)))
+    (when (and (null metal-butt--ask-history) (file-readable-p file))
+      (setq metal-butt--ask-history
+            (ignore-errors
+              (with-temp-buffer
+                (insert-file-contents file)
+                (read (current-buffer))))))))
+
+(defun metal-butt-history-save (repo-root)
+  "Persist `metal-butt--ask-history' for REPO-ROOT to disk.
+Truncated to `metal-butt-history-max-entries', keeping the most recent
+entries -- `read-string' prepends new entries, so the newest are always
+at the front of the list already."
+  (let ((dir (metal-butt-session-dir repo-root)))
+    (make-directory dir t)
+    (with-temp-file (metal-butt--history-file repo-root)
+      (prin1 (seq-take metal-butt--ask-history metal-butt-history-max-entries)
+             (current-buffer)))))
 
 (defun metal-butt-backend-label ()
   "Return a short human-readable name for the active backend.
@@ -246,9 +292,12 @@ as an accept/reject overlay.  A leading @model directive works here too.
 Starts a fresh conversation: any earlier turns tracked for
 `metal-butt-ask-followup' are discarded, since a new top-level question
 is not a continuation of the last one."
-  (interactive (list (read-string (format "Ask %s: " (metal-butt-backend-label))
-                                  nil 'metal-butt--ask-history)))
+  (interactive (progn
+                 (metal-butt-history-load (metal-butt-repo-root))
+                 (list (read-string (format "Ask %s: " (metal-butt-backend-label))
+                                    nil 'metal-butt--ask-history))))
   (setq metal-butt--ask-conversation nil)
+  (metal-butt-history-save (metal-butt-repo-root))
   (let ((split (metal-butt-prompt--extract-model prompt)))
     (metal-butt--dispatch (list :text (cdr split)
                                 :model (car split)
@@ -262,10 +311,13 @@ conversation so the model can use them as context, the same way a human
 follow-up question relies on what was already said rather than repeating
 it.  Errors if there is no conversation yet to follow up on -- run
 `metal-butt-ask' first."
-  (interactive (list (read-string (format "Follow up %s: " (metal-butt-backend-label))
-                                  nil 'metal-butt--ask-history)))
+  (interactive (progn
+                 (metal-butt-history-load (metal-butt-repo-root))
+                 (list (read-string (format "Follow up %s: " (metal-butt-backend-label))
+                                    nil 'metal-butt--ask-history))))
   (unless metal-butt--ask-conversation
     (error "Metal Butt: no conversation yet to follow up on; use M-x metal-butt-ask first"))
+  (metal-butt-history-save (metal-butt-repo-root))
   (let ((split (metal-butt-prompt--extract-model prompt)))
     (metal-butt--dispatch (list :text (cdr split)
                                 :model (car split)
@@ -277,6 +329,27 @@ it.  Errors if there is no conversation yet to follow up on -- run
   "Summarise this session into a handoff note and start a fresh generation."
   (interactive)
   (metal-butt-session-roll (metal-butt-repo-root)))
+
+(defun metal-butt-retry (&optional model)
+  "Resend the most recent prompt, optionally with a different MODEL.
+Reuses `metal-butt--last-prompt' verbatim -- same text, same :reply
+target, same conversation history if it was a follow-up -- so this is
+useful both to retry a request that errored out (a network blip, a
+transient backend hiccup) and to compare how a different model answers
+the same question, without retyping it.  With a prefix arg, prompts for
+MODEL with completion; otherwise resends with the model the prompt was
+originally sent with.  Errors if nothing has been asked yet this buffer."
+  (interactive
+   (list (when current-prefix-arg
+           (completing-read "Retry with model: " (metal-butt-active-known-models)
+                            nil nil))))
+  (unless metal-butt--last-prompt
+    (error "Metal Butt: nothing to retry yet in this buffer"))
+  (let ((prompt metal-butt--last-prompt))
+    (metal-butt--dispatch
+     (if (and model (not (string-empty-p model)))
+         (plist-put (copy-sequence prompt) :model model)
+       prompt))))
 
 (defcustom metal-butt-explain-region-prompt "Explain this code."
   "Canned question sent by `metal-butt-explain-region' with no minibuffer prompt.
@@ -305,6 +378,14 @@ region is active -- mark one first."
                               :reply 'window
                               :track-history t)))
 
+(defun metal-butt--current-exchange ()
+  "Return the last-exchange plist for whichever backend is active.
+Shared by `metal-butt-show-last-exchange' and `metal-butt-status'."
+  (pcase metal-butt-backend
+    ('copilot metal-butt-transport-copilot-last-exchange)
+    ('copilot-api metal-butt-transport-copilot-api-last-exchange)
+    (_ metal-butt-transport-last-exchange)))
+
 (defun metal-butt-show-last-exchange ()
   "Show the raw request and response of the most recent CLI invocation.
 The place to look when a response fails to parse: the payload is otherwise
@@ -313,10 +394,7 @@ active's record: `metal-butt-transport-last-exchange' for `claude',
 `metal-butt-transport-copilot-last-exchange' for `copilot',
 `metal-butt-transport-copilot-api-last-exchange' for `copilot-api'."
   (interactive)
-  (let ((exchange (pcase metal-butt-backend
-                    ('copilot metal-butt-transport-copilot-last-exchange)
-                    ('copilot-api metal-butt-transport-copilot-api-last-exchange)
-                    (_ metal-butt-transport-last-exchange))))
+  (let ((exchange (metal-butt--current-exchange)))
     (if (null exchange)
         (message "Metal Butt: no exchange recorded yet")
       (with-current-buffer (get-buffer-create "*metal-butt-last-exchange*")
@@ -339,6 +417,34 @@ active's record: `metal-butt-transport-last-exchange' for `claude',
           (goto-char (point-min)))
         (view-mode 1))
       (display-buffer "*metal-butt-last-exchange*"))))
+
+(defun metal-butt-status ()
+  "Show a summary of Metal Butt's state for this buffer in one message.
+Reports the active backend, the effective model, the current session id,
+whether a request is in flight, and the cost/tokens/duration of the last
+exchange -- everything you'd otherwise have to check via half a dozen
+different variables and `metal-butt-show-last-exchange', in one place."
+  (interactive)
+  (let* ((root (metal-butt-repo-root))
+         (exchange (metal-butt--current-exchange))
+         (duration (and exchange (plist-get exchange :duration-ms))))
+    (message "Metal Butt: backend=%s model=%s session=%s %s%s%s%s"
+             (metal-butt-backend-label)
+             (metal-butt-effective-model)
+             (metal-butt-session-current-id root)
+             (if metal-butt--in-flight "in-flight" "idle")
+             (if (> metal-butt--last-cost 0)
+                 (format " cost=$%.4f" metal-butt--last-cost)
+               "")
+             (if (> metal-butt--last-premium-requests 0)
+                 (format " premium-requests=%d" metal-butt--last-premium-requests)
+               "")
+             (cond
+              ((> metal-butt--last-input-tokens 0)
+               (format " input-tokens=%d%s" metal-butt--last-input-tokens
+                       (if duration (format " duration=%.1fs" (/ duration 1000.0)) "")))
+              (duration (format " duration=%.1fs" (/ duration 1000.0)))
+              (t "")))))
 
 (defconst metal-butt--modules
   '("metal-butt-prompt"
@@ -389,6 +495,8 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c h a") #'metal-butt-overlay-accept-hunk)
 (define-key metal-butt-mode-map (kbd "C-c h r") #'metal-butt-overlay-reject-hunk)
 (define-key metal-butt-mode-map (kbd "C-c m") #'metal-butt-set-model)
+(define-key metal-butt-mode-map (kbd "C-c s") #'metal-butt-status)
+(define-key metal-butt-mode-map (kbd "C-c t") #'metal-butt-retry)
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode

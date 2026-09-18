@@ -369,6 +369,62 @@
         (metal-butt-ask-followup "question three?"))
       (should-not (string-match-p "question one?" seen-request)))))
 
+(ert-deftest metal-butt-retry-resends-the-last-prompt ()
+  (metal-butt-test--in-repo
+    (insert "// claude: is this safe?\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"callers pass nil\"}"
+      (metal-butt-send-prompt))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"still safe\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-retry))
+      (should (string-match-p "is this safe" seen-request)))))
+
+(ert-deftest metal-butt-retry-can-switch-model ()
+  (metal-butt-test--in-repo
+    (insert "// claude: is this safe?\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"callers pass nil\"}"
+      (metal-butt-send-prompt))
+    (let ((seen-model nil))
+      (let ((metal-butt-transport-function
+             (lambda (_request _session-id callback)
+               (setq seen-model metal-butt-model)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"still safe\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-retry "opus"))
+      (should (equal seen-model "opus")))))
+
+(ert-deftest metal-butt-retry-errors-with-nothing-to-retry ()
+  (metal-butt-test--in-repo
+    (should-error (metal-butt-retry))))
+
+(ert-deftest metal-butt-status-reports-backend-model-and-session ()
+  (metal-butt-test--in-repo
+    (let ((message-log-max nil))
+      (metal-butt-status))
+    (should t)))
+
+(ert-deftest metal-butt-history-save-and-load-round-trip ()
+  (metal-butt-test--in-repo
+    (let ((metal-butt--ask-history '("second question" "first question")))
+      (metal-butt-history-save (metal-butt-repo-root)))
+    (let ((metal-butt--ask-history nil))
+      (metal-butt-history-load (metal-butt-repo-root))
+      (should (equal metal-butt--ask-history '("second question" "first question"))))))
+
+(ert-deftest metal-butt-history-load-does-not-clobber-existing-history ()
+  (metal-butt-test--in-repo
+    (let ((metal-butt--ask-history '("on disk")))
+      (metal-butt-history-save (metal-butt-repo-root)))
+    (let ((metal-butt--ask-history '("already in memory")))
+      (metal-butt-history-load (metal-butt-repo-root))
+      (should (equal metal-butt--ask-history '("already in memory"))))))
+
 (ert-deftest metal-butt-show-reply-wraps-long-lines ()
   "Replies are prose, not code; without visual-line-mode a long answer runs
 off the window edge instead of wrapping, which is what prompted this test."
@@ -383,7 +439,9 @@ off the window edge instead of wrapping, which is what prompted this test."
                   ("C-c e" . metal-butt-explain-region)
                   ("C-c C-a" . metal-butt-accept)
                   ("C-c C-r" . metal-butt-reject)
-                  ("C-c m" . metal-butt-set-model)))
+                  ("C-c m" . metal-butt-set-model)
+                  ("C-c s" . metal-butt-status)
+                  ("C-c t" . metal-butt-retry)))
     (should (eq (lookup-key metal-butt-mode-map (kbd (car pair))) (cdr pair)))))
 
 (ert-deftest metal-butt-mode-map-survives-a-reload ()

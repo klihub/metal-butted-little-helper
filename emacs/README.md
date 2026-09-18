@@ -68,6 +68,8 @@ credentials have expired, refresh them in a terminal first.
 | `C-c h r` | Reject just the current hunk, then advance to the next |
 | `C-c C-d` | Toggle the current hunk between full-region and diff-style view |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
+| `C-c s` | Show backend, model, session id, and last-exchange status |
+| `C-c t` | Retry the last prompt (prefix arg: choose a different model) |
 
 ## Asking without editing the buffer
 
@@ -292,6 +294,25 @@ context gets large, `M-x metal-butt-roll-session` summarises it into a
 handoff note and starts a fresh session. Rolling is never automatic — it
 costs a full-context call, so the timing is yours to choose.
 
+## Status, retry, and prompt history
+
+`C-c s` (`metal-butt-status`) prints a one-line summary to the echo area:
+active backend, effective model, current session id, whether a request is
+in flight, and the cost/tokens/duration of the last exchange — the same
+figures otherwise scattered across the mode line and
+`M-x metal-butt-show-last-exchange`, gathered in one place.
+
+`C-c t` (`metal-butt-retry`) resends the most recently sent prompt verbatim
+— same text, same reply target, same conversation history if it was a
+follow-up. Useful both to retry after a transient failure and, with a
+prefix arg, to resend the same question to a different model for
+comparison (`C-u C-c t` prompts for the model with completion). Errors if
+nothing has been asked yet in this buffer.
+
+`M-p` history for `C-c p` and `C-c C-p` is persisted to
+`.claude/metal-butt/history` (see `metal-butt-history-max-entries`), so it
+survives an Emacs restart instead of resetting to empty every session.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -314,6 +335,7 @@ costs a full-context call, so the timing is yours to choose.
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |
 | `metal-butt-overlay-diff-style` | `'full` | How to render a proposed edit: `'full` (inline highlight + arrow) or `'diff` (struck-through old, `+`-prefixed new) |
 | `metal-butt-explain-region-prompt` | `"Explain this code."` | Canned question sent by `C-c e` (`metal-butt-explain-region`) |
+| `metal-butt-history-max-entries` | `200` | Prompts kept in the persisted `M-p` history file before oldest entries are dropped |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
 
