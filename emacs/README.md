@@ -75,6 +75,45 @@ conversation:
 - In the terminal, `/sync` catches you up on what happened in the editor.
 - The buffer session picks up pending notes on your next `C-c b`.
 
+A pending note is only consumed once a response has actually been applied, so a
+failed request leaves it in place for next time.
+
+### Installing the slash commands
+
+The two commands ship in this repo under `.claude/commands/`, so they work in a
+terminal session started here with no setup. To use them in other projects,
+install them at user level.
+
+**Install globally, namespaced (recommended):**
+
+```sh
+mkdir -p ~/.claude/commands/mb
+cp .claude/commands/handoff.md ~/.claude/commands/mb/handoff.md
+cp .claude/commands/sync.md    ~/.claude/commands/mb/sync.md
+```
+
+A subdirectory becomes a namespace, so these are `/mb:handoff` and `/mb:sync` in
+every session on the machine.
+
+**Use the prefix.** Installed at the top level as `/handoff` and `/sync`, they
+would occupy two generic names in *every* project you open — and a user-level
+command silently **wins** over a project-level one of the same name, with no
+label to say which you got. A collision would shadow the other tool's command
+with no warning. The namespace avoids the whole problem.
+
+**Install per repo instead:** copy the two files into that project's
+`.claude/commands/`. More copies to maintain, but the tooling travels with the
+repo and works for anyone who clones it.
+
+Both work because the commands reference **relative** paths
+(`.claude/metal-butt/to-emacs.md`), which resolve against the session's working
+directory. One global copy therefore writes into whichever project you are in,
+and each project keeps its own handoff files with no configuration.
+
+Note that creating `~/.claude/commands` for the first time needs a session
+restart before the commands appear. Edits to files in a directory that already
+exists are picked up mid-session.
+
 ## Cost
 
 The mode line shows what each prompt cost. When the session's context gets
