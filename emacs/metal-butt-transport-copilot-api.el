@@ -199,10 +199,16 @@ this endpoint has no system-prompt parameter that survives across an
 arbitrary target repository without setup, so the contract travels as
 part of the one user message instead.  STREAM controls the `stream'
 field sent to the API; nil (the default) matches the previous
-non-streaming behavior."
+non-streaming behavior.  When STREAM is non-nil, also requests
+`stream_options.include_usage' -- without it, a streamed response has no
+`usage' object at all (verified against a real streamed response), so
+`:input-tokens' silently reports 0 and `metal-butt-session-should-roll-p'
+never fires for this backend while streaming; asking for it here makes
+the roll nudge work the same regardless of `metal-butt-copilot-api-stream'."
   (json-serialize
    `((model . ,model)
      (stream . ,(if stream t :false))
+     ,@(when stream '((stream_options . ((include_usage . t)))))
      (messages . [((role . "user")
                    (content . ,(concat metal-butt-response-contract "\n\n" request)))]))))
 
@@ -303,18 +309,38 @@ reply is at most a few KB of JSON deltas)."
              (metal-butt-copilot-api--sse-events raw)
              ""))
 
+(defun metal-butt-copilot-api--stream-usage (raw)
+  "Return the `prompt_tokens' figure from RAW streamed SSE bytes, or 0.
+With `stream_options.include_usage' requested (see
+`metal-butt-copilot-api--build-body'), the API sends one extra final
+chunk carrying a top-level `usage' object and an empty `choices' array;
+every other chunk has no `usage' at all, so this looks at every event
+and returns the first one found rather than assuming which position it
+arrives in."
+  (or (seq-some
+       (lambda (payload)
+         (unless (equal payload "[DONE]")
+           (ignore-errors
+             (let* ((data (json-parse-string payload :object-type 'alist
+                                              :null-object nil :false-object nil))
+                    (usage (alist-get 'usage data)))
+               (and usage (alist-get 'prompt_tokens usage))))))
+       (metal-butt-copilot-api--sse-events raw))
+      0))
+
 (defun metal-butt-copilot-api--finish (out err code callback &optional streamed)
   "Interpret one invocation's OUT, ERR and exit CODE, then call CALLBACK.
 Same contract as `metal-butt-transport-copilot--finish'.  STREAMED non-nil
 means OUT is raw Server-Sent-Events bytes rather than one JSON document,
 so the reply text is reassembled via `metal-butt-copilot-api--stream-text'
-instead of parsed with `metal-butt-copilot-api--extract-result'.  A
-streamed response carries no `usage' object (the API omits it unless
-`stream_options.include_usage' is requested, which would need a second,
-undocumented opt-in this backend does not rely on), so cost and token
-figures are reported as 0 in that case -- the mode line already shows
-\" api\" rather than a token count for this backend, so this is not a
-regression, merely not (yet) more precise."
+instead of parsed with `metal-butt-copilot-api--extract-result'.  Token
+usage for a streamed response comes from `metal-butt-copilot-api--stream-usage',
+which relies on the `stream_options.include_usage' opt-in sent by
+`metal-butt-copilot-api--build-body' -- without it there would be no
+`usage' object at all and `metal-butt-session-should-roll-p' would never
+fire for this backend while streaming.  Cost is always reported as 0
+either way: the mode line already shows \" api\" rather than a dollar
+figure for this backend, since the API's response never carries a cost."
   (if (zerop code)
       (condition-case e
           (funcall callback
@@ -323,7 +349,9 @@ regression, merely not (yet) more precise."
                          (when (string-empty-p text)
                            (signal 'metal-butt-copilot-api-transport-error
                                    (list (format "no reply text in streamed response: %s" out))))
-                         (list :text text :cost 0 :input-tokens 0 :premium-requests 0))
+                         (list :text text :cost 0
+                               :input-tokens (metal-butt-copilot-api--stream-usage out)
+                               :premium-requests 0))
                      (metal-butt-copilot-api--extract-result out))
                    nil)
         (metal-butt-copilot-api-transport-error (funcall callback nil (cadr e))))

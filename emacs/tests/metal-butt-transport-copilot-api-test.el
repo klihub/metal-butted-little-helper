@@ -73,6 +73,20 @@ from the same builder so they cannot drift apart like that again."
          (data (json-parse-string body :object-type 'alist)))
     (should (eq t (alist-get 'stream data)))))
 
+(ert-deftest metal-butt-copilot-api-build-body-requests-usage-when-streaming ()
+  "Without this, a streamed response has no `usage' object at all, so
+`metal-butt-session-should-roll-p' never fires for this backend while
+streaming -- see `metal-butt-copilot-api--stream-usage'."
+  (let* ((body (metal-butt-copilot-api--build-body "the request body" "claude-sonnet-5" t))
+         (data (json-parse-string body :object-type 'alist))
+         (options (alist-get 'stream_options data)))
+    (should (eq t (alist-get 'include_usage options)))))
+
+(ert-deftest metal-butt-copilot-api-build-body-omits-stream-options-when-not-streaming ()
+  (let* ((body (metal-butt-copilot-api--build-body "the request body" "claude-sonnet-5" nil))
+         (data (json-parse-string body :object-type 'alist)))
+    (should-not (alist-get 'stream_options data))))
+
 (ert-deftest metal-butt-copilot-api-sse-events-extracts-data-lines ()
   (let ((raw "data: {\"a\":1}\n\ndata: {\"a\":2}\n\ndata: [DONE]\n\n"))
     (should (equal '("{\"a\":1}" "{\"a\":2}" "[DONE]")
@@ -103,6 +117,25 @@ from the same builder so they cannot drift apart like that again."
     (metal-butt-copilot-api--finish raw "" 0 (lambda (r _e) (setq result r)) t)
     (should (equal "hi" (plist-get result :text)))
     (should (equal 0 (plist-get result :cost)))))
+
+(ert-deftest metal-butt-copilot-api-stream-usage-reads-the-usage-chunk ()
+  (let ((raw (concat "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                      "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":123,\"completion_tokens\":4}}\n\n"
+                      "data: [DONE]\n\n")))
+    (should (= 123 (metal-butt-copilot-api--stream-usage raw)))))
+
+(ert-deftest metal-butt-copilot-api-stream-usage-zero-when-absent ()
+  (let ((raw (concat "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                      "data: [DONE]\n\n")))
+    (should (= 0 (metal-butt-copilot-api--stream-usage raw)))))
+
+(ert-deftest metal-butt-copilot-api-finish-streamed-reports-input-tokens ()
+  (let* ((raw (concat "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                       "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":77}}\n\n"
+                       "data: [DONE]\n\n"))
+         (result nil))
+    (metal-butt-copilot-api--finish raw "" 0 (lambda (r _e) (setq result r)) t)
+    (should (= 77 (plist-get result :input-tokens)))))
 
 (ert-deftest metal-butt-copilot-api-token-valid-p-false-when-nil ()
   (let ((metal-butt-copilot-api--token nil))
