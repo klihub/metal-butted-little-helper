@@ -31,16 +31,16 @@
 
 (ert-deftest metal-butt-context-includes-handoff-delta ()
   (metal-butt-test--with-repo root
-    (metal-butt-handoff-append root 'to-emacs "we chose markers over line numbers")
     (with-temp-buffer
       (should (string-match-p "markers over line numbers"
-                              (metal-butt-context-build "p" root))))))
+                              (metal-butt-context-build
+                               "p" root "we chose markers over line numbers"))))))
 
 (ert-deftest metal-butt-context-omits-handoff-section-when-empty ()
   (metal-butt-test--with-repo root
     (with-temp-buffer
       (should-not (string-match-p "Context handed over"
-                                  (metal-butt-context-build "p" root))))))
+                                  (metal-butt-context-build "p" root nil))))))
 
 (ert-deftest metal-butt-context-truncates-large-buffers ()
   (metal-butt-test--with-repo root

@@ -6,8 +6,6 @@
 
 ;;; Code:
 
-(require 'metal-butt-handoff)
-
 (defcustom metal-butt-max-buffer-chars 20000
   "Send at most this much buffer text; larger buffers send a window around point."
   :type 'integer
@@ -23,13 +21,15 @@ The second value of the returned cons is non-nil when truncated."
            (end (min (point-max) (+ (point) half))))
       (cons (buffer-substring-no-properties beg end) t))))
 
-(defun metal-butt-context-build (prompt repo-root)
+(defun metal-butt-context-build (prompt repo-root &optional handoff)
   "Build the text piped to `claude -p' for PROMPT in REPO-ROOT.
-Call with the target buffer current."
+HANDOFF is pending handoff text to include; the caller owns reading and
+acknowledging it.  Call with the target buffer current."
+  (ignore repo-root)
   (let* ((text-and-flag (metal-butt-context--buffer-text))
          (body (car text-and-flag))
          (truncated (cdr text-and-flag))
-         (handoff (metal-butt-handoff-consume repo-root 'to-emacs))
+         (handoff (or handoff ""))
          (parts nil))
     (push (format "## Request\n\n%s\n" prompt) parts)
     (unless (string-empty-p handoff)

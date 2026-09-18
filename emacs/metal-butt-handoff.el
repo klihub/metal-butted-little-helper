@@ -50,23 +50,38 @@
       (unless (string-suffix-p "\n" text) (insert "\n"))
       (write-region (point-min) (point-max) file t 'quiet))))
 
+(defun metal-butt-handoff-peek (repo-root channel)
+  "Return (TEXT . OFFSET) for the unconsumed tail of CHANNEL in REPO-ROOT.
+Does not advance the recorded offset.  Pass OFFSET to
+`metal-butt-handoff-ack' once TEXT has actually been used, so that a failed
+request does not silently discard a note."
+  (let ((file (metal-butt-handoff-file repo-root channel)))
+    (if (not (file-readable-p file))
+        (cons "" 0)
+      (let* ((size (file-attribute-size (file-attributes file)))
+             (recorded (or (alist-get channel
+                                      (metal-butt-handoff--offsets repo-root))
+                           0))
+             (offset (if (> recorded size) 0 recorded)))
+        (if (>= offset size)
+            (cons "" size)
+          (with-temp-buffer
+            (insert-file-contents file nil offset size)
+            (cons (buffer-string) size)))))))
+
+(defun metal-butt-handoff-ack (repo-root channel offset)
+  "Record OFFSET as consumed for CHANNEL in REPO-ROOT."
+  (metal-butt-handoff--set-offset repo-root channel offset))
+
 (defun metal-butt-handoff-consume (repo-root channel)
   "Return the unconsumed tail of CHANNEL in REPO-ROOT, advancing the offset.
 Returns the empty string when there is nothing new.  If the file has
 shrunk since the offset was recorded, re-read from zero: duplicated
 context is acceptable, skipped context is not."
-  (let ((file (metal-butt-handoff-file repo-root channel)))
-    (if (not (file-readable-p file))
-        ""
-      (let* ((size (file-attribute-size (file-attributes file)))
-             (recorded (or (alist-get channel (metal-butt-handoff--offsets repo-root)) 0))
-             (offset (if (> recorded size) 0 recorded)))
-        (if (>= offset size)
-            ""
-          (with-temp-buffer
-            (insert-file-contents file nil offset size)
-            (metal-butt-handoff--set-offset repo-root channel size)
-            (buffer-string)))))))
+  (let ((peeked (metal-butt-handoff-peek repo-root channel)))
+    (unless (string-empty-p (car peeked))
+      (metal-butt-handoff-ack repo-root channel (cdr peeked)))
+    (car peeked)))
 
 (provide 'metal-butt-handoff)
 ;;; metal-butt-handoff.el ends here

@@ -115,3 +115,38 @@
            (lambda (_r _s cb) (funcall cb nil "explicit deny"))))
       (metal-butt-send-prompt))
     (should (= metal-butt--last-cost 0))))
+
+(ert-deftest metal-butt-repo-root-is-fully-resolved ()
+  "Two spellings of one directory must not yield two session ids."
+  (let* ((real (file-name-as-directory (make-temp-file "mb-real" t)))
+         (link (make-temp-name "/tmp/mb-link")))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" real))
+          (make-symbolic-link (directory-file-name real) link)
+          (let ((via-real (let ((default-directory real))
+                            (metal-butt-repo-root)))
+                (via-link (let ((default-directory (file-name-as-directory link)))
+                            (metal-butt-repo-root))))
+            (should (equal via-real via-link))))
+      (ignore-errors (delete-file link))
+      (delete-directory real t))))
+
+(ert-deftest metal-butt-handoff-survives-a-failed-request ()
+  "A failed request must not swallow the terminal session's note."
+  (metal-butt-test--in-repo
+    (metal-butt-handoff-append root 'to-emacs "important context")
+    (insert "// claude: hi\n")
+    (let ((metal-butt-transport-function
+           (lambda (_r _s cb) (funcall cb nil "boom"))))
+      (metal-butt-send-prompt))
+    (should (string-match-p "important context"
+                            (car (metal-butt-handoff-peek root 'to-emacs))))))
+
+(ert-deftest metal-butt-handoff-is-consumed-after-a-successful-request ()
+  (metal-butt-test--in-repo
+    (metal-butt-handoff-append root 'to-emacs "important context")
+    (insert "// claude: hi\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"ok\"}"
+      (metal-butt-send-prompt))
+    (should (equal "" (car (metal-butt-handoff-peek root 'to-emacs))))))

@@ -183,6 +183,13 @@ The likeliest thing still needing adjustment is contract wording — specificall
 whether the model copies `old` character-for-character, including indentation.
 A near-miss shows up as "no match for: …", which is the guard working.
 
+## Open questions, parked
+
+- **The attention word.** `metal-butt-attention-word` exists and defaults to
+  `"claude"`, but the design was never revisited: whether one word is right, how
+  to avoid firing on ordinary prose that happens to mention Claude, and whether
+  it should differ per major mode. Raised 2026-09-18, deliberately deferred.
+
 ## Tests
 
 ```sh

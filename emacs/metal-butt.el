@@ -34,9 +34,12 @@
 (defvar-local metal-butt--last-input-tokens 0)
 
 (defun metal-butt-repo-root ()
-  "Return the top-level directory of the current repository."
-  (or (locate-dominating-file (or default-directory "") ".git")
-      (error "Not inside a git repository")))
+  "Return the top-level directory of the current repository, fully resolved.
+Resolved with `file-truename' so that two spellings of one directory — a
+symlink and its target, say — do not hash to two different session ids."
+  (let ((root (locate-dominating-file (or default-directory "") ".git")))
+    (unless root (error "Not inside a git repository"))
+    (file-truename root)))
 
 (defun metal-butt--apply (response prompt)
   "Apply RESPONSE for PROMPT in the current buffer."
@@ -50,9 +53,11 @@
              (eq (plist-get response :kind) 'reply))
     (delete-region (plist-get prompt :start) (plist-get prompt :end))))
 
-(defun metal-butt--handle (buffer prompt tick result error)
+(defun metal-butt--handle (buffer prompt tick result error &optional ack)
   "Handle RESULT or ERROR for PROMPT sent from BUFFER at modification TICK.
-Does nothing if BUFFER was killed while the request was in flight."
+Does nothing if BUFFER was killed while the request was in flight.
+ACK, when given, is called after a response has been applied, so a failed or
+discarded response does not consume pending handoff context."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq metal-butt--in-flight nil)
@@ -77,7 +82,8 @@ Does nothing if BUFFER was killed while the request was in flight."
         (force-mode-line-update)
         (when (metal-butt-session-should-roll-p metal-butt--last-input-tokens)
           (message "Metal Butt: context is large (%d input tokens); M-x metal-butt-roll-session"
-                   metal-butt--last-input-tokens)))))))
+                   metal-butt--last-input-tokens))
+        (when ack (funcall ack)))))))
 
 (defun metal-butt-send-prompt ()
   "Send the `claude:' comment block at or above point."
@@ -89,9 +95,14 @@ Does nothing if BUFFER was killed while the request was in flight."
                       (error "Metal Butt: no `%s:' comment block at point"
                              metal-butt-attention-word)))
           (root (metal-butt-repo-root)))
-      (let ((request (metal-butt-context-build (plist-get prompt :text) root))
-            (tick (buffer-chars-modified-tick))
-            (buffer (current-buffer)))
+      (let* ((handoff (metal-butt-handoff-peek root 'to-emacs))
+             (request (metal-butt-context-build (plist-get prompt :text)
+                                                root (car handoff)))
+             (tick (buffer-chars-modified-tick))
+             (buffer (current-buffer))
+             (ack (lambda ()
+                    (unless (string-empty-p (car handoff))
+                      (metal-butt-handoff-ack root 'to-emacs (cdr handoff))))))
         (setq metal-butt--in-flight t)
         (message "Metal Butt: thinking...")
         (condition-case err
@@ -99,7 +110,7 @@ Does nothing if BUFFER was killed while the request was in flight."
              request
              (metal-butt-session-current-id root)
              (lambda (result error)
-               (metal-butt--handle buffer prompt tick result error)))
+               (metal-butt--handle buffer prompt tick result error ack)))
           (error
            (setq metal-butt--in-flight nil)
            (signal (car err) (cdr err))))))))
