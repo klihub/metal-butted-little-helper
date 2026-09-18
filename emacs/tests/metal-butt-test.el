@@ -409,6 +409,43 @@
       (metal-butt-status))
     (should t)))
 
+(ert-deftest metal-butt-status-reports-conversation-size-when-tracked ()
+  (metal-butt-test--in-repo
+    (let ((metal-butt--ask-conversation '(("q1" . "a1") ("q2" . "a2")))
+          (captured nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq captured (apply #'format fmt args)))))
+        (metal-butt-status))
+      (should (string-match-p "conversation=2/" captured)))))
+
+(ert-deftest metal-butt-status-omits-conversation-when-empty ()
+  (metal-butt-test--in-repo
+    (let ((metal-butt--ask-conversation nil)
+          (captured nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq captured (apply #'format fmt args)))))
+        (metal-butt-status))
+      (should-not (string-match-p "conversation=" captured)))))
+
+
+(ert-deftest metal-butt-ask-conversation-append-caps-to-max-turns ()
+  (let ((metal-butt-ask-conversation-max-turns 2)
+        (conversation nil))
+    (dotimes (i 3)
+      (setq conversation
+            (metal-butt--ask-conversation-append
+             conversation (format "q%d" i) (format "a%d" i))))
+    (should (equal '(("q1" . "a1") ("q2" . "a2")) conversation))))
+
+(ert-deftest metal-butt-ask-conversation-append-keeps-order-under-cap ()
+  (let ((metal-butt-ask-conversation-max-turns 5)
+        (conversation nil))
+    (dotimes (i 2)
+      (setq conversation
+            (metal-butt--ask-conversation-append
+             conversation (format "q%d" i) (format "a%d" i))))
+    (should (equal '(("q0" . "a0") ("q1" . "a1")) conversation))))
+
 (ert-deftest metal-butt-history-save-and-load-round-trip ()
   (metal-butt-test--in-repo
     (let ((metal-butt--ask-history '("second question" "first question")))

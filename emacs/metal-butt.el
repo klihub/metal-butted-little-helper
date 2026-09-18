@@ -18,6 +18,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'metal-butt-prompt)
 (require 'metal-butt-context)
 (require 'metal-butt-transport)
@@ -125,7 +126,33 @@ extended by both `metal-butt-ask' and `metal-butt-ask-followup' whenever
 a reply comes back, so a subsequent `metal-butt-ask-followup' always
 continues from the latest successful answer.  Buffer-local because the
 conversation is tied to whichever code buffer it is about, not to the
-transient `*metal-butt-reply*' window.")
+transient `*metal-butt-reply*' window.  Capped to the most recent
+`metal-butt-ask-conversation-max-turns' turns -- see that variable's
+docstring for why an uncapped conversation would otherwise grow every
+request's payload without bound.")
+
+(defcustom metal-butt-ask-conversation-max-turns 12
+  "Maximum turns kept in `metal-butt--ask-conversation'.
+Every turn ever asked with `metal-butt-ask-followup' is resent in full
+on every subsequent follow-up, so an uncapped conversation makes every
+request in a long back-and-forth larger than the last, indefinitely --
+this bounds that growth by dropping the oldest turns once the cap is
+reached, keeping the request size roughly constant instead. Rolling the
+whole session (`M-x metal-butt-roll-session') is still the right tool
+for reclaiming a session that has grown large in some other way (a
+large buffer, a big handoff note); this only bounds the ask/follow-up
+history specifically."
+  :type 'integer
+  :group 'metal-butt)
+
+(defun metal-butt--ask-conversation-append (conversation prompt answer)
+  "Return CONVERSATION with a new (PROMPT . ANSWER) turn appended.
+Truncated to the most recent `metal-butt-ask-conversation-max-turns'
+turns, oldest dropped first -- see that variable's docstring."
+  (let ((extended (append conversation (list (cons prompt answer)))))
+    (if (> (length extended) metal-butt-ask-conversation-max-turns)
+        (seq-drop extended (- (length extended) metal-butt-ask-conversation-max-turns))
+      extended)))
 
 (defun metal-butt--apply (response prompt)
   "Apply RESPONSE for PROMPT in the current buffer."
@@ -170,9 +197,10 @@ discarded response does not consume pending handoff context."
               (when (and (plist-get prompt :track-history)
                          (eq (plist-get response :kind) 'reply))
                 (setq metal-butt--ask-conversation
-                      (append metal-butt--ask-conversation
-                              (list (cons (plist-get prompt :text)
-                                          (plist-get response :text)))))))
+                      (metal-butt--ask-conversation-append
+                       metal-butt--ask-conversation
+                       (plist-get prompt :text)
+                       (plist-get response :text)))))
           (metal-butt-response-invalid
            (message "Metal Butt: %s (M-x metal-butt-show-last-exchange to see the payload)"
                     (cadr e)))
@@ -421,18 +449,23 @@ active's record: `metal-butt-transport-last-exchange' for `claude',
 (defun metal-butt-status ()
   "Show a summary of Metal Butt's state for this buffer in one message.
 Reports the active backend, the effective model, the current session id,
-whether a request is in flight, and the cost/tokens/duration of the last
-exchange -- everything you'd otherwise have to check via half a dozen
-different variables and `metal-butt-show-last-exchange', in one place."
+whether a request is in flight, the size of the running `metal-butt-ask'
+conversation, and the cost/tokens/duration of the last exchange --
+everything you'd otherwise have to check via half a dozen different
+variables and `metal-butt-show-last-exchange', in one place."
   (interactive)
   (let* ((root (metal-butt-repo-root))
          (exchange (metal-butt--current-exchange))
          (duration (and exchange (plist-get exchange :duration-ms))))
-    (message "Metal Butt: backend=%s model=%s session=%s %s%s%s%s"
+    (message "Metal Butt: backend=%s model=%s session=%s %s%s%s%s%s"
              (metal-butt-backend-label)
              (metal-butt-effective-model)
              (metal-butt-session-current-id root)
              (if metal-butt--in-flight "in-flight" "idle")
+             (if metal-butt--ask-conversation
+                 (format " conversation=%d/%d turns" (length metal-butt--ask-conversation)
+                         metal-butt-ask-conversation-max-turns)
+               "")
              (if (> metal-butt--last-cost 0)
                  (format " cost=$%.4f" metal-butt--last-cost)
                "")

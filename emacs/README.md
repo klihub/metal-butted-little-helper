@@ -236,6 +236,14 @@ problem persists. This only covers backend-unavailability failures — a
 genuine answer-level error (an unsupported model, a malformed response
 body) still surfaces normally, since switching backends would not fix it.
 
+Because this backend has no server-side session at all, the request body
+is what carries all context, and the streamed response includes a `usage`
+object (via `stream_options.include_usage`) just like the non-streaming
+one, so `M-x metal-butt-status`'s input-token count and
+`metal-butt-session-should-roll-p`'s "roll the session" nudge both work
+the same way here as with the other backends, whether streaming is on or
+off.
+
 A few differences follow from the CLIs themselves, not from any choice made
 here:
 
@@ -321,7 +329,8 @@ costs a full-context call, so the timing is yours to choose.
 
 `C-c s` (`metal-butt-status`) prints a one-line summary to the echo area:
 active backend, effective model, current session id, whether a request is
-in flight, and the cost/tokens/duration of the last exchange — the same
+in flight, the size of the running ask/follow-up conversation (once one has
+started), and the cost/tokens/duration of the last exchange — the same
 figures otherwise scattered across the mode line and
 `M-x metal-butt-show-last-exchange`, gathered in one place.
 
@@ -336,6 +345,17 @@ nothing has been asked yet in this buffer.
 `.claude/metal-butt/history` (see `metal-butt-history-max-entries`), so it
 survives an Emacs restart instead of resetting to empty every session.
 
+A chain of `C-c C-p` follow-ups resends every prior turn of that
+conversation in full on each request, so an unbounded chain would make
+every request larger than the last, indefinitely, regardless of backend.
+`metal-butt-ask-conversation-max-turns` (default 12) bounds this by
+dropping the oldest turn once the cap is reached, keeping the size of a
+long back-and-forth roughly constant; `C-c s` shows the current count so
+you can see it approaching the cap. This is independent of
+`M-x metal-butt-roll-session`, which addresses growth from other sources
+(a large buffer, a big handoff note) by starting an entirely fresh
+session.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -347,6 +367,7 @@ survives an Emacs restart instead of resetting to empty every session.
 | `metal-butt-copilot-api-curl-program` | `"curl"` | Curl program used to reach the Copilot API directly |
 | `metal-butt-copilot-api-stream` | `t` | Request a streaming response from `'copilot-api' and show it growing live in `M-x metal-butt-ask`'s window |
 | `metal-butt-copilot-api-token-prefetch-margin` | `60` | Seconds before expiry that `'copilot-api` proactively refreshes its bearer token in the background; `0` disables it |
+| `metal-butt-ask-conversation-max-turns` | `12` | Max turns kept in a `C-c p`/`C-c C-p` conversation before the oldest are dropped |
 | `metal-butt-model` | `nil` | Explicit model override, regardless of backend; leave `nil` to use the active backend's default |
 | `metal-butt-claude-model` | `"sonnet"` | Default model when `metal-butt-backend` is `'claude` |
 | `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` or `'copilot-api` |
