@@ -27,6 +27,14 @@ harder to diagnose than an outright error."
   :type 'string
   :group 'metal-butt)
 
+(defcustom metal-butt-request-timeout 60
+  "Seconds to wait for a response before abandoning the request.
+Set to nil or 0 to wait indefinitely.  A bound matters because the CLI
+retries some failures with backoff and can take minutes to report them,
+which is indistinguishable from a hang."
+  :type '(choice (const :tag "Wait indefinitely" nil) integer)
+  :group 'metal-butt)
+
 (defconst metal-butt-transport-contract
   "Respond with a single JSON object and nothing else. No prose, no code fences.
 Either {\"kind\":\"edit\",\"edits\":[{\"old\":\"...\",\"new\":\"...\",\"why\":\"...\"}]}
@@ -99,26 +107,47 @@ when the failure was a session that does not exist yet."
 (defun metal-butt-transport--launch (request session-id create callback)
   "Run one claude invocation for SESSION-ID and hand its outcome to CALLBACK.
 CREATE non-nil uses --session-id instead of --resume.  CALLBACK is called
-as described in `metal-butt-transport--finish'."
+as described in `metal-butt-transport--finish', exactly once: whichever of
+the process sentinel and the timeout timer fires first wins."
   (let* ((stdout (generate-new-buffer " *metal-butt-stdout*"))
          (stderr (generate-new-buffer " *metal-butt-stderr*"))
-         (proc (make-process
-                :name "metal-butt"
-                :buffer stdout
-                :stderr stderr
-                :noquery t
-                :connection-type 'pipe
-                :command (cons metal-butt-executable
-                               (metal-butt-transport-argv session-id create))
-                :sentinel
-                (lambda (proc _event)
-                  (when (memq (process-status proc) '(exit signal))
-                    (let ((out (with-current-buffer stdout (buffer-string)))
-                          (err (with-current-buffer stderr (buffer-string)))
-                          (code (process-exit-status proc)))
-                      (kill-buffer stdout)
-                      (kill-buffer stderr)
-                      (metal-butt-transport--finish out err code callback)))))))
+         (done nil)
+         (timer nil)
+         (proc nil))
+    (setq proc
+          (make-process
+           :name "metal-butt"
+           :buffer stdout
+           :stderr stderr
+           :noquery t
+           :connection-type 'pipe
+           :command (cons metal-butt-executable
+                          (metal-butt-transport-argv session-id create))
+           :sentinel
+           (lambda (proc _event)
+             (when (memq (process-status proc) '(exit signal))
+               (let ((out (with-current-buffer stdout (buffer-string)))
+                     (err (with-current-buffer stderr (buffer-string)))
+                     (code (process-exit-status proc)))
+                 (kill-buffer stdout)
+                 (kill-buffer stderr)
+                 (unless done
+                   (setq done t)
+                   (when timer (cancel-timer timer))
+                   (metal-butt-transport--finish out err code callback)))))))
+    (when (and (numberp metal-butt-request-timeout)
+               (> metal-butt-request-timeout 0))
+      (setq timer
+            (run-at-time
+             metal-butt-request-timeout nil
+             (lambda ()
+               (unless done
+                 (setq done t)
+                 (when (process-live-p proc) (kill-process proc))
+                 (funcall callback nil
+                          (format "no response after %d seconds; request abandoned"
+                                  metal-butt-request-timeout)
+                          nil))))))
     (process-send-string proc request)
     (process-send-eof proc)
     proc))

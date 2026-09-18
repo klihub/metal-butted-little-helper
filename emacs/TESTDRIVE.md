@@ -78,6 +78,11 @@ Two further consequences worth knowing:
   authentication failure mid-session rather than at startup, and the message will
   name the model and the failure rather than being vague about it.
 
+A denied request is not fast. The CLI retries some failures with backoff, so an
+authorization denial can take minutes to surface. `metal-butt-request-timeout`
+(60 seconds by default) bounds that, so a slow failure is reported rather than
+looking like a hang.
+
 ## Install
 
 ```elisp

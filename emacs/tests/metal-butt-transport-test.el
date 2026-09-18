@@ -1,4 +1,5 @@
 ;;; metal-butt-transport-test.el --- Tests for the transport  -*- lexical-binding: t; -*-
+(require 'cl-lib)
 (require 'ert)
 (require 'metal-butt-transport)
 
@@ -91,3 +92,20 @@
     (should (equal (plist-get (nth 0 captured) :text) "OK"))
     (should-not (nth 1 captured))
     (should-not (nth 2 captured))))
+
+(ert-deftest metal-butt-transport-times-out-a-slow-process ()
+  "A process that never answers must not leave the caller waiting forever."
+  (let ((metal-butt-executable "sleep")
+        (metal-butt-request-timeout 1)
+        (outcome 'none))
+    (cl-letf (((symbol-function 'metal-butt-transport-argv)
+               (lambda (&rest _) (list "30"))))
+      (metal-butt-transport--run
+       "" "irrelevant-session-id"
+       (lambda (result error) (setq outcome (list result error))))
+      (let ((deadline (+ (float-time) 10)))
+        (while (and (eq outcome 'none) (< (float-time) deadline))
+          (sit-for 0.1))))
+    (should (listp outcome))
+    (should-not (nth 0 outcome))
+    (should (string-match-p "no response after 1 seconds" (nth 1 outcome)))))
