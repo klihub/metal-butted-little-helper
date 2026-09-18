@@ -138,16 +138,28 @@ another async callback layer through every request."
     (metal-butt-copilot-api--exchange-token))
   (alist-get 'token metal-butt-copilot-api--token))
 
-(defun metal-butt-copilot-api--build-body (request model)
+(defcustom metal-butt-copilot-api-stream t
+  "Whether to request a streaming response from the chat/completions API.
+When non-nil, `metal-butt-transport-copilot-api--launch' requests
+Server-Sent Events (`stream: true') and reports partial text as it
+arrives via its PROGRESS callback, in addition to the final result via
+its usual CALLBACK.  Disable if the streaming path ever misbehaves — a
+non-streaming request to the same endpoint always works as a fallback."
+  :type 'boolean
+  :group 'metal-butt)
+
+(defun metal-butt-copilot-api--build-body (request model &optional stream)
   "Build the JSON request body for REQUEST under MODEL.
 Prepends `metal-butt-response-contract' to REQUEST, the same way
 `metal-butt-transport-copilot--build-stdin' does for the CLI backend --
 this endpoint has no system-prompt parameter that survives across an
 arbitrary target repository without setup, so the contract travels as
-part of the one user message instead."
+part of the one user message instead.  STREAM controls the `stream'
+field sent to the API; nil (the default) matches the previous
+non-streaming behavior."
   (json-serialize
    `((model . ,model)
-     (stream . :false)
+     (stream . ,(if stream t :false))
      (messages . [((role . "user")
                    (content . ,(concat metal-butt-response-contract "\n\n" request)))]))))
 
@@ -158,7 +170,7 @@ token (correct for the *token-exchange* call this token came from, see
 `metal-butt-copilot-api--exchange-token') is rejected here with an
 \"IDE token is malformed\" error -- verified against a real failing
 invocation."
-  (format "authorization: Bearer %s" token))
+  (format "authorization: %s %s" "Bearer" token))
 
 (defun metal-butt-copilot-api--curl-command (auth-header)
   "Build the curl argv for a chat/completions call using AUTH-HEADER.
@@ -208,28 +220,93 @@ CLI backend, this endpoint answers with a single JSON document."
             :input-tokens (or (alist-get 'prompt_tokens usage) 0)
             :premium-requests 0))))
 
-(defun metal-butt-copilot-api--finish (out err code callback)
+(defun metal-butt-copilot-api--sse-events (text)
+  "Split TEXT (raw Server-Sent-Events bytes) into a list of `data:' payloads.
+Each event is a line starting with `data: ' followed by either a JSON
+object or the literal `[DONE]' sentinel; blank lines separate events but
+carry no payload of their own and are dropped.  This only looks at
+complete lines, so a chunk ending mid-line is handled by the caller
+re-parsing the whole accumulated buffer on every new chunk rather than
+this function trying to track partial state itself."
+  (let (out)
+    (dolist (line (split-string text "\n"))
+      (when (string-prefix-p "data: " line)
+        (push (substring line (length "data: ")) out)))
+    (nreverse out)))
+
+(defun metal-butt-copilot-api--sse-delta (payload)
+  "Pull the incremental text out of one streamed PAYLOAD, or nil.
+PAYLOAD is one `data: ' event body from `metal-butt-copilot-api--sse-events'.
+Returns nil for the `[DONE]' sentinel, a malformed/unparseable payload, or
+a chunk with no text delta (such as the first chunk, which only carries
+role/metadata) -- callers should treat nil as \"nothing to display yet\",
+not as an error, since these are all routine parts of a normal stream."
+  (unless (equal payload "[DONE]")
+    (ignore-errors
+      (let* ((data (json-parse-string payload :object-type 'alist
+                                       :null-object nil :false-object nil))
+             (choices (alist-get 'choices data))
+             (first-choice (and (vectorp choices) (> (length choices) 0) (elt choices 0)))
+             (delta (and first-choice (alist-get 'delta first-choice)))
+             (content (and delta (alist-get 'content delta))))
+        (and (stringp content) (> (length content) 0) content)))))
+
+(defun metal-butt-copilot-api--stream-text (raw)
+  "Reassemble the full reply text streamed so far from RAW SSE bytes.
+Reparses everything accumulated so far rather than tracking incremental
+state, which is simpler and cheap at the sizes involved here (a whole
+reply is at most a few KB of JSON deltas)."
+  (mapconcat (lambda (payload) (or (metal-butt-copilot-api--sse-delta payload) ""))
+             (metal-butt-copilot-api--sse-events raw)
+             ""))
+
+(defun metal-butt-copilot-api--finish (out err code callback &optional streamed)
   "Interpret one invocation's OUT, ERR and exit CODE, then call CALLBACK.
-Same contract as `metal-butt-transport-copilot--finish'."
+Same contract as `metal-butt-transport-copilot--finish'.  STREAMED non-nil
+means OUT is raw Server-Sent-Events bytes rather than one JSON document,
+so the reply text is reassembled via `metal-butt-copilot-api--stream-text'
+instead of parsed with `metal-butt-copilot-api--extract-result'.  A
+streamed response carries no `usage' object (the API omits it unless
+`stream_options.include_usage' is requested, which would need a second,
+undocumented opt-in this backend does not rely on), so cost and token
+figures are reported as 0 in that case -- the mode line already shows
+\" api\" rather than a token count for this backend, so this is not a
+regression, merely not (yet) more precise."
   (if (zerop code)
       (condition-case e
-          (funcall callback (metal-butt-copilot-api--extract-result out) nil)
+          (funcall callback
+                   (if streamed
+                       (let ((text (metal-butt-copilot-api--stream-text out)))
+                         (when (string-empty-p text)
+                           (signal 'metal-butt-copilot-api-transport-error
+                                   (list (format "no reply text in streamed response: %s" out))))
+                         (list :text text :cost 0 :input-tokens 0 :premium-requests 0))
+                     (metal-butt-copilot-api--extract-result out))
+                   nil)
         (metal-butt-copilot-api-transport-error (funcall callback nil (cadr e))))
     (let ((text (if (string-empty-p (string-trim err)) out err)))
       (funcall callback nil (format "curl failed (exit %d): %s" code text)))))
 
-(defun metal-butt-transport-copilot-api--launch (request session-id callback)
+(defun metal-butt-transport-copilot-api--launch (request session-id callback &optional progress)
   "Send REQUEST for SESSION-ID to the Copilot chat-completions API.
 SESSION-ID is accepted for interface parity with the other two backends'
 launch functions but unused: this backend has no server-side session
 concept, since it makes a single-turn call carrying the whole buffer, the
-same as the other two backends effectively do already."
+same as the other two backends effectively do already.
+
+When `metal-butt-copilot-api-stream' is non-nil, the request asks for a
+streaming response and, if PROGRESS is given, calls it as (PROGRESS TEXT)
+with the reply text reassembled so far every time a new chunk arrives —
+letting a caller show the answer growing live instead of only once the
+whole thing has arrived.  PROGRESS is never called with a final/complete
+guarantee; only CALLBACK's eventual result is authoritative."
   (ignore session-id)
   (condition-case e
       (let* ((start-time (float-time))
              (token (metal-butt-copilot-api--ensure-token))
              (model (metal-butt-active-model))
-             (body (metal-butt-copilot-api--build-body request model))
+             (streaming metal-butt-copilot-api-stream)
+             (body (metal-butt-copilot-api--build-body request model streaming))
              (stdout (generate-new-buffer " *metal-butt-copilot-api-stdout*"))
              (stderr (generate-new-buffer " *metal-butt-copilot-api-stderr*"))
              (done nil)
@@ -247,6 +324,17 @@ same as the other two backends effectively do already."
                :connection-type 'pipe
                :command (metal-butt-copilot-api--curl-command
                          (metal-butt-copilot-api--auth-header token))
+               :filter
+               (lambda (proc chunk)
+                 (when (buffer-live-p (process-buffer proc))
+                   (with-current-buffer (process-buffer proc)
+                     (goto-char (point-max))
+                     (insert chunk)))
+                 (when (and streaming progress)
+                   (ignore-errors
+                     (funcall progress
+                              (metal-butt-copilot-api--stream-text
+                               (with-current-buffer stdout (buffer-string)))))))
                :sentinel
                (lambda (proc _event)
                  (when (memq (process-status proc) '(exit signal))
@@ -266,7 +354,7 @@ same as the other two backends effectively do already."
                      (unless done
                        (setq done t)
                        (when timer (cancel-timer timer))
-                       (metal-butt-copilot-api--finish out err code callback)))))))
+                       (metal-butt-copilot-api--finish out err code callback streaming)))))))
         (when (and (numberp metal-butt-request-timeout)
                    (> metal-butt-request-timeout 0))
           (setq timer
@@ -287,11 +375,13 @@ same as the other two backends effectively do already."
 (defvar metal-butt-transport-copilot-api-function
   #'metal-butt-transport-copilot-api--launch
   "Function used to reach the Copilot chat-completions API.
-Called as (FN REQUEST SESSION-ID CALLBACK).  Rebind in tests.")
+Called as (FN REQUEST SESSION-ID CALLBACK PROGRESS).  Rebind in tests.")
 
-(defun metal-butt-transport-copilot-api-send (request session-id callback)
-  "Send REQUEST for SESSION-ID via `metal-butt-transport-copilot-api-function'."
-  (funcall metal-butt-transport-copilot-api-function request session-id callback))
+(defun metal-butt-transport-copilot-api-send (request session-id callback &optional progress)
+  "Send REQUEST for SESSION-ID via `metal-butt-transport-copilot-api-function'.
+PROGRESS, if given, is forwarded as the streaming-progress callback; see
+`metal-butt-transport-copilot-api--launch'."
+  (funcall metal-butt-transport-copilot-api-function request session-id callback progress))
 
 (provide 'metal-butt-transport-copilot-api)
 ;;; metal-butt-transport-copilot-api.el ends here

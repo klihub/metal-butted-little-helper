@@ -276,7 +276,7 @@ caller established around this call."
   "Function used to reach Claude.
 Called as (FN REQUEST SESSION-ID CALLBACK).  Rebind in tests.")
 
-(defun metal-butt-transport-send (request session-id callback)
+(defun metal-butt-transport-send (request session-id callback &optional progress)
   "Send REQUEST for SESSION-ID via the backend named by `metal-butt-backend'.
 The Claude backend goes through `metal-butt-transport-function', the
 injectable seam tests rebind.  The Copilot CLI backend has its own
@@ -285,10 +285,17 @@ analogous seam, `metal-butt-transport-copilot-function', reached via
 a third, `metal-butt-transport-copilot-api-function', reached via
 `metal-butt-transport-copilot-api-send' — three backends' argv, wire
 format and error shapes differ enough that sharing one seam would mean
-every stub had to pretend to be all three at once."
+every stub had to pretend to be all three at once.
+
+PROGRESS, if given, is a function of one argument (partial reply text)
+called zero or more times before CALLBACK, as streamed output arrives.
+Only `copilot-api' currently streams; the `claude' and `copilot' CLI
+backends silently ignore PROGRESS rather than erroring, since their
+non-interactive output modes don't produce incremental text deltas the
+same way (a possible future improvement, not yet implemented)."
   (pcase metal-butt-backend
     ('copilot (metal-butt-transport-copilot-send request session-id callback))
-    ('copilot-api (metal-butt-transport-copilot-api-send request session-id callback))
+    ('copilot-api (metal-butt-transport-copilot-api-send request session-id callback progress))
     (_ (funcall metal-butt-transport-function request session-id callback))))
 
 (provide 'metal-butt-transport)

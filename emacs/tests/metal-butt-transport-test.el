@@ -204,7 +204,7 @@ failure it exists to prevent."
          (metal-butt-transport-function
           (lambda (&rest _) (setq claude-called t)))
          (metal-butt-transport-copilot-api-function
-          (lambda (req sid cb) (setq copilot-api-called (list req sid)) (funcall cb nil nil))))
+          (lambda (req sid cb &optional _progress) (setq copilot-api-called (list req sid)) (funcall cb nil nil))))
     (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil))
     (should-not claude-called)
     (should (equal copilot-api-called '("req" "sid")))))

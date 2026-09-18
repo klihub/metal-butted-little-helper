@@ -94,5 +94,35 @@ Signal `metal-butt-response-invalid' if it does not conform."
                :edits (mapcar #'metal-butt-response--edit (append edits nil)))))
       (kind (metal-butt-response--fail "unknown kind: %S" kind)))))
 
+(defun metal-butt-response-preview-text (partial-json)
+  "Best-effort snippet of reply text out of PARTIAL-JSON, or nil.
+PARTIAL-JSON is an incomplete prefix of a streaming response -- not yet
+valid JSON, since the object has not closed -- so this never signals
+`metal-butt-response-invalid' the way `metal-butt-response-parse' does;
+it is for a live \"still typing\" preview only, and the final, fully
+validated text always comes from `metal-butt-response-parse' once the
+stream completes.  Returns nil rather than a wrong answer when it
+cannot find a `\"text\":\"...' field to extract from, including for an
+`edit' reply, which has no top-level `text' to preview at all."
+  (when (and (stringp partial-json)
+             (string-match "\"kind\"[ \t\n]*:[ \t\n]*\"reply\"" partial-json))
+    (when (string-match "\"text\"[ \t\n]*:[ \t\n]*\"" partial-json)
+      (let* ((start (match-end 0))
+             (raw (substring partial-json start))
+             (acc nil)
+             (escaped nil)
+             (closed nil))
+        (catch 'done
+          (dolist (c (append raw nil))
+            (cond
+             (escaped
+              (push (pcase c (?n ?\n) (?t ?\t) (?r ?\r) (_ c)) acc)
+              (setq escaped nil))
+             ((eq c ?\\) (setq escaped t))
+             ((eq c ?\") (setq closed t) (throw 'done nil))
+             (t (push c acc)))))
+        (ignore closed)
+        (and acc (concat (nreverse acc)))))))
+
 (provide 'metal-butt-response)
 ;;; metal-butt-response.el ends here

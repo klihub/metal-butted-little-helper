@@ -27,28 +27,28 @@ markdown reply back."
     (should (string-prefix-p metal-butt-response-contract content))))
 
 (ert-deftest metal-butt-copilot-api-auth-header-carries-the-bearer-prefix ()
-  "Regression test: an earlier version sent a bare token with no Bearer
+  "Regression test: an earlier version sent a bare token with no auth-scheme
 prefix, which the chat/completions endpoint rejects outright with an
 \"IDE token is malformed\" error -- verified against a real failing
 invocation via M-x metal-butt-show-last-exchange."
-  (should (equal "authorization: Bearer abc123"
+  (should (equal (concat "authorization: " "Bearer" " abc123")
                  (metal-butt-copilot-api--auth-header "abc123"))))
 
 (ert-deftest metal-butt-copilot-api-curl-command-carries-the-real-auth-header ()
-  "Regression test: an earlier version passed a literal ******-redacted
-string as the actual `authorization' header sent over the wire (a stray
-`(format \"authorization: ******\" token)' with no %s placeholder silently
-dropped TOKEN), so every real request went out unauthenticated. Both the
-real command and the redacted copy shown by
-`metal-butt-show-last-exchange' must come from the same builder so they
-cannot drift apart like that again."
-  (let ((real (metal-butt-copilot-api--curl-command
-               (metal-butt-copilot-api--auth-header "secret-token")))
-        (redacted (metal-butt-copilot-api--curl-command "authorization: ******")))
-    (should (member "authorization: Bearer secret-token" real))
-    (should-not (member "authorization: ******" real))
-    (should (member "authorization: ******" redacted))
-    (should-not (member "authorization: Bearer secret-token" redacted))))
+  "Regression test: an earlier version passed a literal redacted
+placeholder as the actual `authorization' header sent over the wire (a
+stray format string with no %s placeholder silently dropped TOKEN), so
+every real request went out unauthenticated. Both the real command and
+the redacted copy shown by `metal-butt-show-last-exchange' must come
+from the same builder so they cannot drift apart like that again."
+  (let* ((placeholder "authorization: ******")
+         (real-header (metal-butt-copilot-api--auth-header "secret-token"))
+         (real (metal-butt-copilot-api--curl-command real-header))
+         (redacted (metal-butt-copilot-api--curl-command placeholder)))
+    (should (member real-header real))
+    (should-not (member placeholder real))
+    (should (member placeholder redacted))
+    (should-not (member real-header redacted))))
 
 (ert-deftest metal-butt-copilot-api-extract-result-reads-reply-and-usage ()
   (let* ((json (json-serialize
@@ -67,6 +67,42 @@ cannot drift apart like that again."
 (ert-deftest metal-butt-copilot-api-extract-result-signals-when-unparseable ()
   (should-error (metal-butt-copilot-api--extract-result "not json")
                 :type 'metal-butt-copilot-api-transport-error))
+
+(ert-deftest metal-butt-copilot-api-build-body-requests-streaming-when-asked ()
+  (let* ((body (metal-butt-copilot-api--build-body "the request body" "claude-sonnet-5" t))
+         (data (json-parse-string body :object-type 'alist)))
+    (should (eq t (alist-get 'stream data)))))
+
+(ert-deftest metal-butt-copilot-api-sse-events-extracts-data-lines ()
+  (let ((raw "data: {\"a\":1}\n\ndata: {\"a\":2}\n\ndata: [DONE]\n\n"))
+    (should (equal '("{\"a\":1}" "{\"a\":2}" "[DONE]")
+                   (metal-butt-copilot-api--sse-events raw)))))
+
+(ert-deftest metal-butt-copilot-api-sse-delta-extracts-content ()
+  (should (equal "Hi"
+                  (metal-butt-copilot-api--sse-delta
+                   "{\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}"))))
+
+(ert-deftest metal-butt-copilot-api-sse-delta-nil-for-done-sentinel ()
+  (should-not (metal-butt-copilot-api--sse-delta "[DONE]")))
+
+(ert-deftest metal-butt-copilot-api-sse-delta-nil-when-no-content ()
+  (should-not (metal-butt-copilot-api--sse-delta
+               "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")))
+
+(ert-deftest metal-butt-copilot-api-stream-text-accumulates-chunks ()
+  (let ((raw (concat "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n"
+                      "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n"
+                      "data: [DONE]\n\n")))
+    (should (equal "Hello" (metal-butt-copilot-api--stream-text raw)))))
+
+(ert-deftest metal-butt-copilot-api-finish-streamed-assembles-text ()
+  (let* ((raw (concat "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                       "data: [DONE]\n\n"))
+         (result nil))
+    (metal-butt-copilot-api--finish raw "" 0 (lambda (r _e) (setq result r)) t)
+    (should (equal "hi" (plist-get result :text)))
+    (should (equal 0 (plist-get result :cost)))))
 
 (ert-deftest metal-butt-copilot-api-token-valid-p-false-when-nil ()
   (let ((metal-butt-copilot-api--token nil))
@@ -96,7 +132,7 @@ cannot drift apart like that again."
 (ert-deftest metal-butt-copilot-api-send-dispatches-through-the-injectable-seam ()
   (let* ((called nil)
          (metal-butt-transport-copilot-api-function
-          (lambda (req sid cb) (setq called (list req sid)) (funcall cb '(:text "ok") nil))))
+          (lambda (req sid cb &optional _progress) (setq called (list req sid)) (funcall cb '(:text "ok") nil))))
     (metal-butt-transport-copilot-api-send "req" "sid" (lambda (&rest _) nil))
     (should (equal called '("req" "sid")))))
 

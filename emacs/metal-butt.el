@@ -96,6 +96,23 @@ so soft-wrapping is what a reader actually wants here."
       (view-mode 1))
     (display-buffer buffer)))
 
+(defun metal-butt--show-reply-progress (text)
+  "Show a live, in-progress TEXT preview in the reply window.
+Same buffer as `metal-butt--show-reply', so the final call to that
+function (once the response is complete) simply replaces this preview;
+used only for prompts with :reply `window', since a `comment' reply is
+inserted at point just once, and there is nowhere sensible to preview a
+comment-in-progress without disturbing the buffer being edited."
+  (let ((buffer (get-buffer-create "*metal-butt-reply*")))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert text)
+        (goto-char (point-min)))
+      (visual-line-mode 1)
+      (view-mode 1))
+    (display-buffer buffer)))
+
 (defun metal-butt--apply (response prompt)
   "Apply RESPONSE for PROMPT in the current buffer."
   (pcase (plist-get response :kind)
@@ -174,7 +191,12 @@ prompt located in the buffer also carries :start and :end markers."
            request
            (metal-butt-session-current-id root)
            (lambda (result error)
-             (metal-butt--handle buffer prompt tick result error ack)))
+             (metal-butt--handle buffer prompt tick result error ack))
+           (when (eq (plist-get prompt :reply) 'window)
+             (lambda (partial-text)
+               (when (buffer-live-p buffer)
+                 (let ((preview (metal-butt-response-preview-text partial-text)))
+                   (when preview (metal-butt--show-reply-progress preview)))))))
         (error
          (setq metal-butt--in-flight nil)
          (signal (car err) (cdr err)))))))

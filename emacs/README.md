@@ -138,6 +138,17 @@ whereas the `copilot` CLI backend is a supported, stable interface. Use
 want the same model with much lower latency and are fine depending on an
 undocumented endpoint copilot-chat already relies on.
 
+By default (`metal-butt-copilot-api-stream` is `t`), this backend requests a
+streaming response and, for `M-x metal-butt-ask` (which shows its answer in a
+separate window rather than inserting it at point), shows the reply growing
+live as chunks arrive instead of only appearing once the whole answer is
+back. This is a perceived-latency improvement only: the underlying JSON
+response contract still requires one complete, valid JSON document, so the
+live preview shows a best-effort snippet of the `text` field as it streams in
+and the final applied answer is always parsed from the fully-assembled
+response, not the partial preview. Set `metal-butt-copilot-api-stream` to
+`nil` to go back to waiting for the whole response before showing anything.
+
 A few differences follow from the CLIs themselves, not from any choice made
 here:
 
@@ -228,6 +239,7 @@ costs a full-context call, so the timing is yours to choose.
 | `metal-butt-copilot-executable` | `"copilot"` | Name or path of the Copilot CLI |
 | `metal-butt-copilot-api-github-token-file` | `"~/.config/copilot-chat/github-token"` | GitHub token file reused from `copilot-chat`, for `'copilot-api` |
 | `metal-butt-copilot-api-curl-program` | `"curl"` | Curl program used to reach the Copilot API directly |
+| `metal-butt-copilot-api-stream` | `t` | Request a streaming response from `'copilot-api' and show it growing live in `M-x metal-butt-ask`'s window |
 | `metal-butt-model` | `nil` | Explicit model override, regardless of backend; leave `nil` to use the active backend's default |
 | `metal-butt-claude-model` | `"sonnet"` | Default model when `metal-butt-backend` is `'claude` |
 | `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` or `'copilot-api` |

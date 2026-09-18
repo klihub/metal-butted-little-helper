@@ -87,3 +87,23 @@
   (let ((r (metal-butt-response-parse
             "{\"kind\":\"reply\",\"text\":\"he said \\\"hi\\\" then\nleft\"}")))
     (should (equal (plist-get r :text) "he said \"hi\" then\nleft"))))
+
+(ert-deftest metal-butt-response-preview-text-extracts-partial-reply ()
+  (should (equal "Hello wor"
+                 (metal-butt-response-preview-text
+                  "{\"kind\":\"reply\",\"text\":\"Hello wor"))))
+
+(ert-deftest metal-butt-response-preview-text-nil-before-text-field-appears ()
+  (should-not (metal-butt-response-preview-text "{\"kind\":\"reply\",\"te")))
+
+(ert-deftest metal-butt-response-preview-text-nil-for-edit-kind ()
+  (should-not (metal-butt-response-preview-text "{\"kind\":\"edit\",\"edits\":[")))
+
+(ert-deftest metal-butt-response-preview-text-nil-for-nil-input ()
+  (should-not (metal-butt-response-preview-text nil)))
+
+(ert-deftest metal-butt-response-preview-text-handles-escaped-newline ()
+  (should (equal "line one\nline two"
+                 (metal-butt-response-preview-text
+                  "{\"kind\":\"reply\",\"text\":\"line one\\nline two"))))
+
