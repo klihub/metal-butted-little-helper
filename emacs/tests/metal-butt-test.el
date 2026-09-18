@@ -251,6 +251,65 @@
       (should (with-current-buffer "*metal-butt-reply*"
                 (string-match-p "late but shown" (buffer-string)))))))
 
+(ert-deftest metal-butt-ask-followup-errors-without-a-prior-ask ()
+  (metal-butt-test--in-repo
+    (should-error (metal-butt-ask-followup "and then?"))))
+
+(ert-deftest metal-butt-ask-followup-sends-prior-turn-as-history ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"first answer\"}"
+      (metal-butt-ask "first question?"))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"second answer\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-ask-followup "second question?"))
+      (should (string-match-p "first question?" seen-request))
+      (should (string-match-p "first answer" seen-request))
+      (should (with-current-buffer "*metal-butt-reply*"
+                (string-match-p "second answer" (buffer-string)))))))
+
+(ert-deftest metal-butt-ask-followup-chains-across-multiple-turns ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer one\"}"
+      (metal-butt-ask "question one?"))
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer two\"}"
+      (metal-butt-ask-followup "question two?"))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"answer three\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-ask-followup "question three?"))
+      (should (string-match-p "question one?" seen-request))
+      (should (string-match-p "question two?" seen-request)))))
+
+(ert-deftest metal-butt-ask-resets-the-conversation ()
+  "A fresh `metal-butt-ask' must not carry over an old conversation."
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer one\"}"
+      (metal-butt-ask "question one?"))
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer two\"}"
+      (metal-butt-ask "question two?"))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"answer three\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-ask-followup "question three?"))
+      (should-not (string-match-p "question one?" seen-request))
+      (should (string-match-p "question two?" seen-request)))))
+
 (ert-deftest metal-butt-show-reply-wraps-long-lines ()
   "Replies are prose, not code; without visual-line-mode a long answer runs
 off the window edge instead of wrapping, which is what prompted this test."

@@ -21,10 +21,15 @@ The second value of the returned cons is non-nil when truncated."
            (end (min (point-max) (+ (point) half))))
       (cons (buffer-substring-no-properties beg end) t))))
 
-(defun metal-butt-context-build (prompt repo-root &optional handoff)
+(defun metal-butt-context-build (prompt repo-root &optional handoff history)
   "Build the text piped to `claude -p' for PROMPT in REPO-ROOT.
 HANDOFF is pending handoff text to include; the caller owns reading and
-acknowledging it.  Call with the target buffer current."
+acknowledging it.  HISTORY, when given, is a list of (PROMPT . ANSWER)
+conses from earlier turns of the same `metal-butt-ask' conversation,
+oldest first; included so a follow-up question is answered with the
+prior exchange in mind instead of the model seeing only the buffer and
+the new question, as if this were the first thing ever asked.  Call with
+the target buffer current."
   (ignore repo-root)
   (let* ((text-and-flag (metal-butt-context--buffer-text))
          (body (car text-and-flag))
@@ -32,6 +37,13 @@ acknowledging it.  Call with the target buffer current."
          (handoff (or handoff ""))
          (parts nil))
     (push (format "## Request\n\n%s\n" prompt) parts)
+    (when history
+      (push (concat "## Earlier turns in this conversation\n\n"
+                     (mapconcat (lambda (turn)
+                                  (format "Q: %s\nA: %s\n" (car turn) (cdr turn)))
+                                history "\n")
+                     "\n")
+            parts))
     (unless (string-empty-p handoff)
       (push (format "## Context handed over from the terminal session\n\n%s\n" handoff)
             parts))

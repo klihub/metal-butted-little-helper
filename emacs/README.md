@@ -60,6 +60,7 @@ credentials have expired, refresh them in a terminal first.
 |---|---|
 | `C-c b` | Send the `claude:` block at or above point |
 | `C-c p` | Ask from the minibuffer, answer in its own window |
+| `C-c C-p` | Ask a follow-up, continuing the last `C-c p` conversation |
 | `C-c C-a` | Accept the proposed edit |
 | `C-c C-r` | Reject the proposed edit |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
@@ -75,6 +76,14 @@ rather not touch the file, `C-c p` reads it from the minibuffer instead:
 - `M-p` recalls earlier questions.
 - An `@model` token works here too: `@opus why is this nil?`
 - Mark a region first and it travels with the question.
+
+Once you've asked something with `C-c p`, `C-c C-p` (`metal-butt-ask-followup`)
+lets you continue that same conversation: every earlier question and answer in
+the chain is sent along as context, so "and what about the error case?" is
+understood as a continuation instead of a fresh, unrelated question. Starting
+a new question with `C-c p` resets the conversation, so the next `C-c C-p`
+follows up on that new question instead of the old one. `metal-butt-ask-followup`
+errors if there is no conversation yet — run `C-c p` first.
 
 ## Choosing a model
 

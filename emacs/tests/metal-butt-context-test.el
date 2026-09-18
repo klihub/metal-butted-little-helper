@@ -42,6 +42,20 @@
       (should-not (string-match-p "Context handed over"
                                   (metal-butt-context-build "p" root nil))))))
 
+(ert-deftest metal-butt-context-includes-history-when-given ()
+  (metal-butt-test--with-repo root
+    (with-temp-buffer
+      (let ((request (metal-butt-context-build
+                      "p" root nil '(("first q?" . "first a.")))))
+        (should (string-match-p "first q?" request))
+        (should (string-match-p "first a\\." request))))))
+
+(ert-deftest metal-butt-context-omits-history-section-when-nil ()
+  (metal-butt-test--with-repo root
+    (with-temp-buffer
+      (should-not (string-match-p "Earlier turns"
+                                  (metal-butt-context-build "p" root nil nil))))))
+
 (ert-deftest metal-butt-context-truncates-large-buffers ()
   (metal-butt-test--with-repo root
     (with-temp-buffer

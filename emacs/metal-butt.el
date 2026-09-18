@@ -113,6 +113,15 @@ comment-in-progress without disturbing the buffer being edited."
       (view-mode 1))
     (display-buffer buffer)))
 
+(defvar-local metal-butt--ask-conversation nil
+  "Prior (PROMPT . ANSWER) turns for the running `metal-butt-ask' conversation.
+Oldest first.  Reset whenever `metal-butt-ask' starts a fresh question;
+extended by both `metal-butt-ask' and `metal-butt-ask-followup' whenever
+a reply comes back, so a subsequent `metal-butt-ask-followup' always
+continues from the latest successful answer.  Buffer-local because the
+conversation is tied to whichever code buffer it is about, not to the
+transient `*metal-butt-reply*' window.")
+
 (defun metal-butt--apply (response prompt)
   "Apply RESPONSE for PROMPT in the current buffer."
   (pcase (plist-get response :kind)
@@ -151,7 +160,14 @@ discarded response does not consume pending handoff context."
               metal-butt--last-input-tokens (plist-get result :input-tokens)
               metal-butt--last-premium-requests (or (plist-get result :premium-requests) 0))
         (condition-case e
-            (metal-butt--apply (metal-butt-response-parse (plist-get result :text)) prompt)
+            (let ((response (metal-butt-response-parse (plist-get result :text))))
+              (metal-butt--apply response prompt)
+              (when (and (plist-get prompt :track-history)
+                         (eq (plist-get response :kind) 'reply))
+                (setq metal-butt--ask-conversation
+                      (append metal-butt--ask-conversation
+                              (list (cons (plist-get prompt :text)
+                                          (plist-get response :text)))))))
           (metal-butt-response-invalid
            (message "Metal Butt: %s (M-x metal-butt-show-last-exchange to see the payload)"
                     (cadr e)))
@@ -177,7 +193,8 @@ prompt located in the buffer also carries :start and :end markers."
   (let* ((root (metal-butt-repo-root))
          (handoff (metal-butt-handoff-peek root 'to-emacs))
          (request (metal-butt-context-build (plist-get prompt :text)
-                                            root (car handoff)))
+                                            root (car handoff)
+                                            (plist-get prompt :history)))
          (tick (buffer-chars-modified-tick))
          (buffer (current-buffer))
          (ack (lambda ()
@@ -225,13 +242,36 @@ whichever backend will actually answer instead of always saying Claude."
 (defun metal-butt-ask (prompt)
   "Ask PROMPT about this buffer without writing the question into it.
 The answer appears in a separate window; a proposed code edit still arrives
-as an accept/reject overlay.  A leading @model directive works here too."
+as an accept/reject overlay.  A leading @model directive works here too.
+Starts a fresh conversation: any earlier turns tracked for
+`metal-butt-ask-followup' are discarded, since a new top-level question
+is not a continuation of the last one."
   (interactive (list (read-string (format "Ask %s: " (metal-butt-backend-label))
                                   nil 'metal-butt--ask-history)))
+  (setq metal-butt--ask-conversation nil)
   (let ((split (metal-butt-prompt--extract-model prompt)))
     (metal-butt--dispatch (list :text (cdr split)
                                 :model (car split)
-                                :reply 'window))))
+                                :reply 'window
+                                :track-history t))))
+
+(defun metal-butt-ask-followup (prompt)
+  "Ask PROMPT as a continuation of the last `metal-butt-ask' conversation.
+Includes every earlier (question . answer) pair from this buffer's running
+conversation so the model can use them as context, the same way a human
+follow-up question relies on what was already said rather than repeating
+it.  Errors if there is no conversation yet to follow up on -- run
+`metal-butt-ask' first."
+  (interactive (list (read-string (format "Follow up %s: " (metal-butt-backend-label))
+                                  nil 'metal-butt--ask-history)))
+  (unless metal-butt--ask-conversation
+    (error "Metal Butt: no conversation yet to follow up on; use M-x metal-butt-ask first"))
+  (let ((split (metal-butt-prompt--extract-model prompt)))
+    (metal-butt--dispatch (list :text (cdr split)
+                                :model (car split)
+                                :reply 'window
+                                :track-history t
+                                :history metal-butt--ask-conversation))))
 
 (defun metal-butt-roll-session ()
   "Summarise this session into a handoff note and start a fresh generation."
@@ -314,6 +354,7 @@ yourself.")
 
 (define-key metal-butt-mode-map (kbd "C-c b") #'metal-butt-send-prompt)
 (define-key metal-butt-mode-map (kbd "C-c p") #'metal-butt-ask)
+(define-key metal-butt-mode-map (kbd "C-c C-p") #'metal-butt-ask-followup)
 (define-key metal-butt-mode-map (kbd "C-c C-a") #'metal-butt-accept)
 (define-key metal-butt-mode-map (kbd "C-c C-r") #'metal-butt-reject)
 (define-key metal-butt-mode-map (kbd "C-c m") #'metal-butt-set-model)
