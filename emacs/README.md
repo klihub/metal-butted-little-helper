@@ -57,12 +57,27 @@ credentials have expired, refresh them in a terminal first.
 | Key | Command |
 |---|---|
 | `C-c b` | Send the `claude:` block at or above point |
+| `C-c p` | Ask from the minibuffer, answer in its own window |
 | `C-c C-a` | Accept the proposed edit |
 | `C-c C-r` | Reject the proposed edit |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 
 `C-c b` rather than `C-c C-c`, which is already `comment-region` in `c-mode`
 and `python-shell-send-buffer` in `python-mode`.
+
+## Asking without editing the buffer
+
+`C-c b` needs the question written into the buffer as a comment. When you would
+rather not touch the file, `C-c p` reads the question from the minibuffer
+instead:
+
+- The answer opens in `*metal-butt-reply*`; `q` dismisses it. The code buffer is
+  never modified.
+- A proposed edit still arrives as an accept/reject overlay, exactly as with
+  `C-c b`.
+- `M-p` recalls earlier questions.
+- An `@model` token works here too: `@opus why is this nil?`
+- Mark a region first and it travels with the question.
 
 ## Sharing context with a terminal session
 

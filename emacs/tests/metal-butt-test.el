@@ -176,3 +176,58 @@
         (should-error (metal-butt-send-prompt)))
       (should-not called)
       (should-not metal-butt--in-flight))))
+
+(ert-deftest metal-butt-ask-shows-a-reply-in-a-window ()
+  "The code buffer must not be touched by a question."
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (let ((before (buffer-string)))
+      (metal-butt-test--with-stub
+          "{\"kind\":\"reply\",\"text\":\"because api.go passes nil\"}"
+        (metal-butt-ask "why is this nil?"))
+      (should (equal before (buffer-string)))
+      (should (with-current-buffer "*metal-butt-reply*"
+                (string-match-p "api.go passes nil" (buffer-string)))))))
+
+(ert-deftest metal-butt-ask-still-proposes-edits-as-overlays ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (metal-butt-test--with-stub
+        "{\"kind\":\"edit\",\"edits\":[{\"old\":\"int x\",\"new\":\"int count\"}]}"
+      (metal-butt-ask "rename x"))
+    (should (metal-butt-overlay-pending-p))
+    (should (string-match-p "int x = 1;" (buffer-string)))))
+
+(ert-deftest metal-butt-ask-parses-a-model-directive ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (let (seen)
+      (let ((metal-butt-transport-function
+             (lambda (_r _s cb)
+               (setq seen metal-butt-model)
+               (funcall cb (list :text "{\"kind\":\"reply\",\"text\":\"ok\"}"
+                                 :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-ask "@opus explain this"))
+      (should (equal seen "opus")))))
+
+(ert-deftest metal-butt-ask-rejects-an-empty-prompt ()
+  (metal-butt-test--in-repo
+    (let ((called nil))
+      (let ((metal-butt-transport-function (lambda (&rest _) (setq called t))))
+        (should-error (metal-butt-ask "   ")))
+      (should-not called))))
+
+(ert-deftest metal-butt-ask-reply-survives-a-mid-flight-edit ()
+  "A window reply modifies nothing, so typing must not throw it away."
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (let ((saved nil))
+      (let ((metal-butt-transport-function (lambda (_r _s cb) (setq saved cb))))
+        (metal-butt-ask "why?"))
+      (insert "int y = 2;\n")
+      (funcall saved (list :text "{\"kind\":\"reply\",\"text\":\"late but shown\"}"
+                           :cost 0 :input-tokens 0)
+               nil)
+      (should (with-current-buffer "*metal-butt-reply*"
+                (string-match-p "late but shown" (buffer-string)))))))

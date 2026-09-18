@@ -11,6 +11,9 @@
 ;;
 ;; Code edits come back as an accept/reject overlay; discussion comes back
 ;; as a comment block.  Claude never writes to disk.
+;;
+;; Or press C-c p to ask from the minibuffer, leaving the buffer untouched;
+;; the answer appears in its own window.
 
 ;;; Code:
 
@@ -71,16 +74,30 @@ symlink and its target, say — do not hash to two different session ids."
     (unless root (error "Not inside a git repository"))
     (file-truename root)))
 
+(defun metal-butt--show-reply (text)
+  "Show TEXT in the reply window, leaving the code buffer untouched."
+  (let ((buffer (get-buffer-create "*metal-butt-reply*")))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert text)
+        (goto-char (point-min)))
+      (view-mode 1))
+    (display-buffer buffer)))
+
 (defun metal-butt--apply (response prompt)
   "Apply RESPONSE for PROMPT in the current buffer."
   (pcase (plist-get response :kind)
     ('reply
-     (metal-butt-comment-insert (plist-get response :text)
-                                (marker-position (plist-get prompt :end))))
+     (if (eq (plist-get prompt :reply) 'window)
+         (metal-butt--show-reply (plist-get response :text))
+       (metal-butt-comment-insert (plist-get response :text)
+                                  (marker-position (plist-get prompt :end)))))
     ('edit
      (metal-butt-overlay-propose-all (plist-get response :edits))))
   (when (and metal-butt-delete-prompt-after-send
-             (eq (plist-get response :kind) 'reply))
+             (eq (plist-get response :kind) 'reply)
+             (plist-get prompt :start))
     (delete-region (plist-get prompt :start) (plist-get prompt :end))))
 
 (defun metal-butt--handle (buffer prompt tick result error &optional ack)
@@ -97,7 +114,8 @@ discarded response does not consume pending handoff context."
               metal-butt--last-input-tokens 0)
         (force-mode-line-update)
         (message "Metal Butt: %s" error))
-       ((/= tick (buffer-chars-modified-tick))
+       ((and (/= tick (buffer-chars-modified-tick))
+             (not (eq (plist-get prompt :reply) 'window)))
         (message "Metal Butt: buffer changed while the request was in flight; response discarded"))
        (t
         (setq metal-butt--last-cost (plist-get result :cost)
@@ -115,40 +133,60 @@ discarded response does not consume pending handoff context."
                    metal-butt--last-input-tokens))
         (when ack (funcall ack)))))))
 
-(defun metal-butt-send-prompt ()
-  "Send the `claude:' comment block at or above point."
-  (interactive)
+(defun metal-butt--dispatch (prompt)
+  "Send PROMPT and arrange for its response to be applied.
+PROMPT is a plist: :text and optional :model, plus :reply, which is `comment'
+to insert an answer into the buffer or `window' to show it separately.  A
+prompt located in the buffer also carries :start and :end markers."
   (when metal-butt--in-flight
     (error "Metal Butt: a request is already in flight for this buffer"))
+  (when (string-match-p "\\`[ \t\n]*\\'" (plist-get prompt :text))
+    (error "Metal Butt: the prompt is empty"))
+  (when (plist-get prompt :model)
+    (metal-butt-check-model (plist-get prompt :model)))
+  (let* ((root (metal-butt-repo-root))
+         (handoff (metal-butt-handoff-peek root 'to-emacs))
+         (request (metal-butt-context-build (plist-get prompt :text)
+                                            root (car handoff)))
+         (tick (buffer-chars-modified-tick))
+         (buffer (current-buffer))
+         (ack (lambda ()
+                (unless (string-empty-p (car handoff))
+                  (metal-butt-handoff-ack root 'to-emacs (cdr handoff))))))
+    (let ((metal-butt-model (metal-butt-effective-model (plist-get prompt :model))))
+      (setq metal-butt--in-flight t)
+      (message "Metal Butt: thinking...")
+      (condition-case err
+          (metal-butt-transport-send
+           request
+           (metal-butt-session-current-id root)
+           (lambda (result error)
+             (metal-butt--handle buffer prompt tick result error ack)))
+        (error
+         (setq metal-butt--in-flight nil)
+         (signal (car err) (cdr err)))))))
+
+(defun metal-butt-send-prompt ()
+  "Send the attention-word comment block at or above point."
+  (interactive)
   (save-excursion
     (let ((prompt (or (metal-butt-prompt-at-point)
                       (error "Metal Butt: no `%s:' comment block at point"
-                             (mapconcat #'identity metal-butt-attention-words "/"))))
-          (root (metal-butt-repo-root)))
-      (let* ((handoff (metal-butt-handoff-peek root 'to-emacs))
-             (request (metal-butt-context-build (plist-get prompt :text)
-                                                root (car handoff)))
-             (tick (buffer-chars-modified-tick))
-             (buffer (current-buffer))
-             (ack (lambda ()
-                    (unless (string-empty-p (car handoff))
-                      (metal-butt-handoff-ack root 'to-emacs (cdr handoff))))))
-        (when (plist-get prompt :model)
-          (metal-butt-check-model (plist-get prompt :model)))
-        (when (string-match-p "\\`[ \t\n]*\\'" (plist-get prompt :text))
-          (error "Metal Butt: the prompt is empty"))
-        (let ((metal-butt-model (metal-butt-effective-model (plist-get prompt :model))))
-          (setq metal-butt--in-flight t)
-          (message "Metal Butt: thinking...")
-          (condition-case err
-              (metal-butt-transport-send
-               request
-               (metal-butt-session-current-id root)
-               (lambda (result error)
-                 (metal-butt--handle buffer prompt tick result error ack)))
-            (error
-             (setq metal-butt--in-flight nil)
-             (signal (car err) (cdr err)))))))))
+                             (mapconcat #'identity metal-butt-attention-words "/")))))
+      (metal-butt--dispatch (append prompt (list :reply 'comment))))))
+
+(defvar metal-butt--ask-history nil
+  "Prompts previously entered with `metal-butt-ask', for M-p recall.")
+
+(defun metal-butt-ask (prompt)
+  "Ask PROMPT about this buffer without writing the question into it.
+The answer appears in a separate window; a proposed code edit still arrives
+as an accept/reject overlay.  A leading @model directive works here too."
+  (interactive (list (read-string "Ask Claude: " nil 'metal-butt--ask-history)))
+  (let ((split (metal-butt-prompt--extract-model prompt)))
+    (metal-butt--dispatch (list :text (cdr split)
+                                :model (car split)
+                                :reply 'window))))
 
 (defun metal-butt-roll-session ()
   "Summarise this session into a handoff note and start a fresh generation."
@@ -183,6 +221,7 @@ discarded along with the process buffers."
 (defvar metal-butt-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c b") #'metal-butt-send-prompt)
+    (define-key map (kbd "C-c p") #'metal-butt-ask)
     (define-key map (kbd "C-c C-a") #'metal-butt-accept)
     (define-key map (kbd "C-c C-r") #'metal-butt-reject)
     (define-key map (kbd "C-c m") #'metal-butt-set-model)
