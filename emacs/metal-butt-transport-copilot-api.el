@@ -72,7 +72,21 @@ exist, install and log in with the `copilot-chat' Emacs package once
 (defvar metal-butt-copilot-api--token nil
   "Cached Copilot API bearer token, an alist with `token' and `expires-at'.
 Renewed lazily by `metal-butt-copilot-api--ensure-token' once it is missing
-or actually expired, not on every request.")
+or actually expired, not on every request, and also refreshed proactively
+in the background by `metal-butt-copilot-api--schedule-refresh' shortly
+before it expires, so a request after a long idle period usually finds a
+token already warm instead of paying the exchange latency itself.")
+
+(defcustom metal-butt-copilot-api-token-prefetch-margin 60
+  "Seconds before token expiry that the background refresh fires.
+Set to 0 to disable proactive refresh and fall back to the old
+lazy-only behaviour (a token is still renewed on demand if it has
+actually expired by the time a request needs it)."
+  :type 'integer
+  :group 'metal-butt)
+
+(defvar metal-butt-copilot-api--refresh-timer nil
+  "Timer for the background token refresh, or nil if none is scheduled.")
 
 (defun metal-butt-copilot-api--read-github-token ()
   "Read the cached GitHub OAuth token from
@@ -129,8 +143,37 @@ another async callback layer through every request."
                   (list (cons 'token token)
                         (cons 'expires-at (if (numberp expires-at)
                                                (float expires-at)
-                                             (+ (float-time) 1500)))))))
+                                             (+ (float-time) 1500)))))
+            (metal-butt-copilot-api--schedule-refresh)))
       (kill-buffer buffer))))
+
+(defun metal-butt-copilot-api--schedule-refresh ()
+  "Arrange a background token exchange shortly before the current one expires.
+Cancels any timer already pending first, so repeated calls (a proactive
+refresh followed by a lazy one, say) never stack up more than one
+pending timer.  Does nothing if `metal-butt-copilot-api-token-prefetch-margin'
+is zero or the current token has no known expiry.  Errors from the
+background exchange are reported with `message' rather than signalled,
+since there is no synchronous caller here to catch them -- the next
+request's lazy `metal-butt-copilot-api--ensure-token' still renews the
+token itself if this background attempt fails."
+  (when metal-butt-copilot-api--refresh-timer
+    (cancel-timer metal-butt-copilot-api--refresh-timer)
+    (setq metal-butt-copilot-api--refresh-timer nil))
+  (let ((expires-at (alist-get 'expires-at metal-butt-copilot-api--token)))
+    (when (and (numberp expires-at)
+               (> metal-butt-copilot-api-token-prefetch-margin 0))
+      (let ((delay (- expires-at (float-time) metal-butt-copilot-api-token-prefetch-margin)))
+        (setq metal-butt-copilot-api--refresh-timer
+              (run-at-time
+               (max delay 1) nil
+               (lambda ()
+                 (setq metal-butt-copilot-api--refresh-timer nil)
+                 (condition-case e
+                     (metal-butt-copilot-api--exchange-token)
+                   (error
+                    (message "Metal Butt: background token refresh failed (%s); will retry on next request"
+                             (error-message-string e)))))))))))
 
 (defun metal-butt-copilot-api--ensure-token ()
   "Return a valid Copilot API bearer token, renewing it if necessary."

@@ -129,6 +129,45 @@ from the same builder so they cannot drift apart like that again."
       (should (equal "fresh-token" (metal-butt-copilot-api--ensure-token))))
     (should-not exchange-called)))
 
+(ert-deftest metal-butt-copilot-api-schedule-refresh-arms-a-timer ()
+  (let ((metal-butt-copilot-api--refresh-timer nil)
+        (metal-butt-copilot-api--token
+         (list (cons 'token "t") (cons 'expires-at (+ (float-time) 600)))))
+    (unwind-protect
+        (progn
+          (metal-butt-copilot-api--schedule-refresh)
+          (should (timerp metal-butt-copilot-api--refresh-timer)))
+      (when metal-butt-copilot-api--refresh-timer
+        (cancel-timer metal-butt-copilot-api--refresh-timer)))))
+
+(ert-deftest metal-butt-copilot-api-schedule-refresh-does-nothing-without-expiry ()
+  (let ((metal-butt-copilot-api--refresh-timer nil)
+        (metal-butt-copilot-api--token (list (cons 'token "t"))))
+    (metal-butt-copilot-api--schedule-refresh)
+    (should-not metal-butt-copilot-api--refresh-timer)))
+
+(ert-deftest metal-butt-copilot-api-schedule-refresh-does-nothing-when-margin-is-zero ()
+  (let ((metal-butt-copilot-api--refresh-timer nil)
+        (metal-butt-copilot-api-token-prefetch-margin 0)
+        (metal-butt-copilot-api--token
+         (list (cons 'token "t") (cons 'expires-at (+ (float-time) 600)))))
+    (metal-butt-copilot-api--schedule-refresh)
+    (should-not metal-butt-copilot-api--refresh-timer)))
+
+(ert-deftest metal-butt-copilot-api-schedule-refresh-cancels-a-prior-pending-timer ()
+  (let* ((metal-butt-copilot-api--token
+          (list (cons 'token "t") (cons 'expires-at (+ (float-time) 600))))
+         (metal-butt-copilot-api--refresh-timer (run-at-time 600 nil #'ignore))
+         (stale metal-butt-copilot-api--refresh-timer))
+    (unwind-protect
+        (progn
+          (metal-butt-copilot-api--schedule-refresh)
+          (should-not (memq stale timer-list))
+          (should (timerp metal-butt-copilot-api--refresh-timer))
+          (should (not (eq stale metal-butt-copilot-api--refresh-timer))))
+      (when metal-butt-copilot-api--refresh-timer
+        (cancel-timer metal-butt-copilot-api--refresh-timer)))))
+
 (ert-deftest metal-butt-copilot-api-send-dispatches-through-the-injectable-seam ()
   (let* ((called nil)
          (metal-butt-transport-copilot-api-function

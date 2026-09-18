@@ -213,6 +213,18 @@ and the final applied answer is always parsed from the fully-assembled
 response, not the partial preview. Set `metal-butt-copilot-api-stream` to
 `nil` to go back to waiting for the whole response before showing anything.
 
+The Copilot API bearer token this backend exchanges the cached GitHub token
+for is short-lived (~25 minutes) and, without any prefetching, is only
+renewed lazily on the first request after it goes stale — so that first
+request after an idle period pays the exchange's own latency on top of the
+model call. To avoid that, a background timer refreshes the token shortly
+before it expires (`metal-butt-copilot-api-token-prefetch-margin`, default
+60 seconds), so requests almost always find an already-warm token. If the
+background refresh fails for some reason (network blip, expired GitHub
+token), it just logs a message — the next request's lazy renewal still
+covers for it. Set `metal-butt-copilot-api-token-prefetch-margin` to `0` to
+disable proactive refresh and go back to the old lazy-only behaviour.
+
 A few differences follow from the CLIs themselves, not from any choice made
 here:
 
@@ -323,6 +335,7 @@ survives an Emacs restart instead of resetting to empty every session.
 | `metal-butt-copilot-api-github-token-file` | `"~/.config/copilot-chat/github-token"` | GitHub token file reused from `copilot-chat`, for `'copilot-api` |
 | `metal-butt-copilot-api-curl-program` | `"curl"` | Curl program used to reach the Copilot API directly |
 | `metal-butt-copilot-api-stream` | `t` | Request a streaming response from `'copilot-api' and show it growing live in `M-x metal-butt-ask`'s window |
+| `metal-butt-copilot-api-token-prefetch-margin` | `60` | Seconds before expiry that `'copilot-api` proactively refreshes its bearer token in the background; `0` disables it |
 | `metal-butt-model` | `nil` | Explicit model override, regardless of backend; leave `nil` to use the active backend's default |
 | `metal-butt-claude-model` | `"sonnet"` | Default model when `metal-butt-backend` is `'claude` |
 | `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` or `'copilot-api` |
