@@ -310,6 +310,65 @@
       (should-not (string-match-p "question one?" seen-request))
       (should (string-match-p "question two?" seen-request)))))
 
+(ert-deftest metal-butt-explain-region-errors-without-a-region ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (should-error (metal-butt-explain-region))))
+
+(ert-deftest metal-butt-explain-region-sends-the-canned-question ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (goto-char (point-min))
+    (push-mark (point) t t)
+    (activate-mark)
+    (goto-char (point-max))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"it declares x\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-explain-region))
+      (should (string-match-p (regexp-quote metal-butt-explain-region-prompt) seen-request))
+      (should (string-match-p "## Selected region" seen-request)))))
+
+(ert-deftest metal-butt-explain-region-does-not-touch-the-buffer ()
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (goto-char (point-min))
+    (push-mark (point) t t)
+    (activate-mark)
+    (goto-char (point-max))
+    (let ((before (buffer-string)))
+      (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"it declares x\"}"
+        (metal-butt-explain-region))
+      (should (equal before (buffer-string)))
+      (should (with-current-buffer "*metal-butt-reply*"
+                (string-match-p "it declares x" (buffer-string)))))))
+
+(ert-deftest metal-butt-explain-region-resets-the-conversation ()
+  "Like `metal-butt-ask', a fresh call must not carry over an old conversation."
+  (metal-butt-test--in-repo
+    (insert "int x = 1;\n")
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer one\"}"
+      (metal-butt-ask "question one?"))
+    (goto-char (point-min))
+    (push-mark (point) t t)
+    (activate-mark)
+    (goto-char (point-max))
+    (metal-butt-test--with-stub "{\"kind\":\"reply\",\"text\":\"answer two\"}"
+      (metal-butt-explain-region))
+    (let ((seen-request nil))
+      (let ((metal-butt-transport-function
+             (lambda (request _session-id callback)
+               (setq seen-request request)
+               (funcall callback (list :text "{\"kind\":\"reply\",\"text\":\"answer three\"}"
+                                       :cost 0 :input-tokens 0)
+                        nil))))
+        (metal-butt-ask-followup "question three?"))
+      (should-not (string-match-p "question one?" seen-request)))))
+
 (ert-deftest metal-butt-show-reply-wraps-long-lines ()
   "Replies are prose, not code; without visual-line-mode a long answer runs
 off the window edge instead of wrapping, which is what prompted this test."
@@ -321,6 +380,7 @@ off the window edge instead of wrapping, which is what prompted this test."
   "Bindings live at top level so a reload installs them; guard all five."
   (dolist (pair '(("C-c b" . metal-butt-send-prompt)
                   ("C-c p" . metal-butt-ask)
+                  ("C-c e" . metal-butt-explain-region)
                   ("C-c C-a" . metal-butt-accept)
                   ("C-c C-r" . metal-butt-reject)
                   ("C-c m" . metal-butt-set-model)))

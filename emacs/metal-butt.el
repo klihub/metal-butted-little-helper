@@ -278,6 +278,33 @@ it.  Errors if there is no conversation yet to follow up on -- run
   (interactive)
   (metal-butt-session-roll (metal-butt-repo-root)))
 
+(defcustom metal-butt-explain-region-prompt "Explain this code."
+  "Canned question sent by `metal-butt-explain-region' with no minibuffer prompt.
+Kept short and generic since the marked region is already attached as
+context (see `metal-butt-context-build''s \"## Selected region\" section) --
+this is just what to do with it."
+  :type 'string
+  :group 'metal-butt)
+
+(defun metal-butt-explain-region ()
+  "Ask a canned question about the marked region with no minibuffer prompt.
+Lighter-weight than `metal-butt-ask' for the common case of \"what does
+this do\": mark a region and press the key, no typing required.  The
+question asked is `metal-butt-explain-region-prompt'; the region is
+attached as context the same way `metal-butt-ask' attaches one, via
+`metal-butt-context-build''s \"## Selected region\" section, so the model
+still sees exactly the marked text alongside the rest of the buffer.
+Starts a fresh conversation, like `metal-butt-ask', so a later
+`metal-butt-ask-followup' continues from this question. Errors if no
+region is active -- mark one first."
+  (interactive)
+  (unless (use-region-p)
+    (error "Metal Butt: no region marked; select the code to ask about first"))
+  (setq metal-butt--ask-conversation nil)
+  (metal-butt--dispatch (list :text metal-butt-explain-region-prompt
+                              :reply 'window
+                              :track-history t)))
+
 (defun metal-butt-show-last-exchange ()
   "Show the raw request and response of the most recent CLI invocation.
 The place to look when a response fails to parse: the payload is otherwise
@@ -355,6 +382,7 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c b") #'metal-butt-send-prompt)
 (define-key metal-butt-mode-map (kbd "C-c p") #'metal-butt-ask)
 (define-key metal-butt-mode-map (kbd "C-c C-p") #'metal-butt-ask-followup)
+(define-key metal-butt-mode-map (kbd "C-c e") #'metal-butt-explain-region)
 (define-key metal-butt-mode-map (kbd "C-c C-a") #'metal-butt-accept)
 (define-key metal-butt-mode-map (kbd "C-c C-r") #'metal-butt-reject)
 (define-key metal-butt-mode-map (kbd "C-c C-d") #'metal-butt-overlay-toggle-style)

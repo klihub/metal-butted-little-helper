@@ -60,7 +60,8 @@ credentials have expired, refresh them in a terminal first.
 |---|---|
 | `C-c b` | Send the `claude:` block at or above point |
 | `C-c p` | Ask from the minibuffer, answer in its own window |
-| `C-c C-p` | Ask a follow-up, continuing the last `C-c p` conversation |
+| `C-c e` | Explain the marked region — no minibuffer, no typing |
+| `C-c C-p` | Ask a follow-up, continuing the last `C-c p`/`C-c e` conversation |
 | `C-c C-a` | Accept the whole proposed edit (all remaining hunks) |
 | `C-c C-r` | Reject the whole proposed edit (all remaining hunks) |
 | `C-c h a` | Accept just the current hunk, then advance to the next |
@@ -87,6 +88,17 @@ understood as a continuation instead of a fresh, unrelated question. Starting
 a new question with `C-c p` resets the conversation, so the next `C-c C-p`
 follows up on that new question instead of the old one. `metal-butt-ask-followup`
 errors if there is no conversation yet — run `C-c p` first.
+
+## Explaining a region without any minibuffer prompt
+
+`C-c p` still needs a question typed into the minibuffer. For the common case
+of "what does this do", `C-c e` (`metal-butt-explain-region`) skips that
+entirely: mark a region and press the key. It sends the canned question in
+`metal-butt-explain-region-prompt` (default: "Explain this code.") with the
+region attached as context, exactly as `C-c p` attaches a marked region —
+customise the prompt if you'd rather it ask something else by default.
+Errors if no region is active. Like `C-c p`, it starts a fresh conversation,
+so `C-c C-p` afterwards follows up on the explanation just given.
 
 ## Reviewing a proposed edit: full-region or diff style
 
@@ -301,6 +313,7 @@ costs a full-context call, so the timing is yours to choose.
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |
 | `metal-butt-overlay-diff-style` | `'full` | How to render a proposed edit: `'full` (inline highlight + arrow) or `'diff` (struck-through old, `+`-prefixed new) |
+| `metal-butt-explain-region-prompt` | `"Explain this code."` | Canned question sent by `C-c e` (`metal-butt-explain-region`) |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
 
