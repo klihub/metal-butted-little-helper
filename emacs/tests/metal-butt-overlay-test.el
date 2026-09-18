@@ -130,3 +130,83 @@
       (should (eq (metal-butt-overlay--style) 'diff))
       (metal-butt-accept)
       (should (eq (metal-butt-overlay--style) 'full)))))
+
+(ert-deftest metal-butt-overlay-single-hunk-edit-behaves-as-before ()
+  "An edit with one contiguous change has exactly one hunk."
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma\n")
+    (metal-butt-overlay-propose '(:old "beta" :new "BETA"))
+    (should (= (length metal-butt-overlay--hunks) 1))
+    (metal-butt-accept)
+    (should (equal (buffer-string) "alpha\nBETA\ngamma\n"))))
+
+(ert-deftest metal-butt-overlay-splits-a-multiline-edit-into-hunks ()
+  "A rename touching two of three lines produces two change hunks."
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (should (= metal-butt-overlay--hunk-total 2))))
+
+(ert-deftest metal-butt-overlay-accept-hunk-applies-only-that-hunk ()
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (metal-butt-overlay-accept-hunk)
+    (should (equal (buffer-string) "LINE one\nline two\nline three\n"))
+    (should (metal-butt-overlay-pending-p))
+    (metal-butt-overlay-accept-hunk)
+    (should (equal (buffer-string) "LINE one\nline two\nLINE three\n"))
+    (should-not (metal-butt-overlay-pending-p))))
+
+(ert-deftest metal-butt-overlay-reject-hunk-leaves-that-hunk-untouched ()
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (metal-butt-overlay-reject-hunk)
+    (should (equal (buffer-string) "line one\nline two\nline three\n"))
+    (should (metal-butt-overlay-pending-p))
+    (metal-butt-overlay-accept-hunk)
+    (should (equal (buffer-string) "line one\nline two\nLINE three\n"))
+    (should-not (metal-butt-overlay-pending-p))))
+
+(ert-deftest metal-butt-overlay-accept-whole-edit-applies-every-hunk ()
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (metal-butt-accept)
+    (should (equal (buffer-string) "LINE one\nline two\nLINE three\n"))
+    (should-not (metal-butt-overlay-pending-p))))
+
+(ert-deftest metal-butt-overlay-reject-whole-edit-applies-no-hunk ()
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (metal-butt-reject)
+    (should (equal (buffer-string) "line one\nline two\nline three\n"))
+    (should-not (metal-butt-overlay-pending-p))))
+
+(ert-deftest metal-butt-overlay-accept-stops-at-next-queued-edit ()
+  "`metal-butt-accept' must not blow through the boundary into the next edit."
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\nfour\n")
+    (metal-butt-overlay-propose-all
+     '((:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three")
+       (:old "four" :new "FOUR")))
+    (metal-butt-accept)
+    (should (metal-butt-overlay-pending-p))
+    (should (equal (plist-get metal-butt-overlay--current :old) "four"))
+    (metal-butt-accept)
+    (should (equal (buffer-string) "LINE one\nline two\nLINE three\nFOUR\n"))))
+
+(ert-deftest metal-butt-overlay-accept-hunk-without-proposal-is-an-error ()
+  (with-temp-buffer
+    (should-error (metal-butt-overlay-accept-hunk))))
+
+(ert-deftest metal-butt-overlay-reject-hunk-without-proposal-is-an-error ()
+  (with-temp-buffer
+    (should-error (metal-butt-overlay-reject-hunk))))

@@ -358,6 +358,8 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c C-a") #'metal-butt-accept)
 (define-key metal-butt-mode-map (kbd "C-c C-r") #'metal-butt-reject)
 (define-key metal-butt-mode-map (kbd "C-c C-d") #'metal-butt-overlay-toggle-style)
+(define-key metal-butt-mode-map (kbd "C-c h a") #'metal-butt-overlay-accept-hunk)
+(define-key metal-butt-mode-map (kbd "C-c h r") #'metal-butt-overlay-reject-hunk)
 (define-key metal-butt-mode-map (kbd "C-c m") #'metal-butt-set-model)
 
 ;;;###autoload

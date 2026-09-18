@@ -61,9 +61,11 @@ credentials have expired, refresh them in a terminal first.
 | `C-c b` | Send the `claude:` block at or above point |
 | `C-c p` | Ask from the minibuffer, answer in its own window |
 | `C-c C-p` | Ask a follow-up, continuing the last `C-c p` conversation |
-| `C-c C-a` | Accept the proposed edit |
-| `C-c C-r` | Reject the proposed edit |
-| `C-c C-d` | Toggle the pending edit between full-region and diff-style view |
+| `C-c C-a` | Accept the whole proposed edit (all remaining hunks) |
+| `C-c C-r` | Reject the whole proposed edit (all remaining hunks) |
+| `C-c h a` | Accept just the current hunk, then advance to the next |
+| `C-c h r` | Reject just the current hunk, then advance to the next |
+| `C-c C-d` | Toggle the current hunk between full-region and diff-style view |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 
 ## Asking without editing the buffer
@@ -99,10 +101,30 @@ A proposed edit is shown one of two ways, controlled by
   follow for a multi-line edit, where `full` style's inline arrow can bury
   the change in a wall of text.
 
-`C-c C-d` (`metal-butt-overlay-toggle-style`) flips the *pending* edit
+`C-c C-d` (`metal-butt-overlay-toggle-style`) flips the *current hunk*
 between the two views without touching the buffer or changing the default —
-the next edit proposed goes back to whatever `metal-butt-overlay-diff-style`
-says.
+the next hunk or edit proposed goes back to whatever
+`metal-butt-overlay-diff-style` says.
+
+## Accepting an edit hunk by hunk
+
+When a proposed edit touches several disjoint spans of the buffer — a rename
+across a handful of nearby lines, say — Metal Butt splits it into hunks, one
+per contiguous changed span, and reviews them one at a time, magit
+stage-hunk style:
+
+- `C-c h a` (`metal-butt-overlay-accept-hunk`) applies just the hunk under
+  review and moves on to the next one.
+- `C-c h r` (`metal-butt-overlay-reject-hunk`) discards just that hunk and
+  moves on.
+- `C-c C-a` / `C-c C-r` still take the whole edit at once — every remaining
+  hunk of the current edit is accepted or rejected in one step, which is all
+  that ever happens for the common case of an edit with a single hunk.
+
+The minibuffer message while a hunk is under review shows `(k/n hunks)`
+once an edit has more than one, so you always know where you are in a
+multi-hunk edit. Hunks are resolved strictly in order; once the last hunk of
+an edit is resolved, review moves on to the next queued edit, if any.
 
 ## Choosing a model
 
