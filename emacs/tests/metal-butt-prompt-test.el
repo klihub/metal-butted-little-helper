@@ -101,6 +101,16 @@
         (should (equal (plist-get (metal-butt-prompt-at-point) :text)
                        "do the thing"))))))
 
+(ert-deftest metal-butt-prompt-default-words-are-backend-neutral ()
+  "The default list is not Claude-only: `mb', `metal-butt' and `butty' work
+without any customisation, since `metal-butt-backend' can be `copilot' and
+\"claude:\" would otherwise be a misleading spelling to have to type."
+  (dolist (word '("claude" "mb" "metal-butt" "butty"))
+    (metal-butt-test--with-buffer #'prog-mode
+        (format "// %s: do the thing|\n" word)
+      (should (equal (plist-get (metal-butt-prompt-at-point) :text)
+                     "do the thing")))))
+
 (ert-deftest metal-butt-prompt-ignores-unconfigured-words ()
   (let ((metal-butt-attention-words '("claude")))
     (metal-butt-test--with-buffer #'prog-mode

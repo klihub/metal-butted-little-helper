@@ -11,37 +11,96 @@
 ;;; Code:
 
 (require 'seq)
+(require 'metal-butt-response)
+(require 'metal-butt-transport-copilot)
 
 (define-error 'metal-butt-transport-error "Claude CLI transport failed")
+
+(defcustom metal-butt-backend 'claude
+  "Which CLI answers buffer prompts: `claude' or `copilot'.
+Everything above the transport — prompt detection, the overlay, comment
+insertion, handoff files — is CLI-agnostic, so switching this is the whole
+migration.  It does not change `metal-butt-model': the two CLIs use
+different model name spellings (\"sonnet\" versus \"claude-sonnet-5\", for
+instance), so that variable needs a value appropriate to whichever backend
+is active."
+  :type '(choice (const :tag "Claude Code (claude)" claude)
+                 (const :tag "GitHub Copilot CLI (copilot)" copilot))
+  :group 'metal-butt)
 
 (defcustom metal-butt-executable "claude"
   "Name or path of the Claude Code CLI."
   :type 'string
   :group 'metal-butt)
 
-(defcustom metal-butt-model "sonnet"
-  "Model used for buffer prompts.
-There is deliberately no automatic fallback to a cheaper model.  A silent
-downgrade would change edit quality without the user knowing why, which is
-harder to diagnose than an outright error."
+(defcustom metal-butt-claude-model "sonnet"
+  "Default model for buffer prompts when `metal-butt-backend' is `claude'.
+There is deliberately no automatic fallback to a cheaper model on refusal.
+A silent downgrade would change edit quality without the user knowing why,
+which is harder to diagnose than an outright error."
   :type 'string
   :group 'metal-butt)
 
+(defcustom metal-butt-copilot-model "claude-sonnet-5"
+  "Default model for buffer prompts when `metal-butt-backend' is `copilot'."
+  :type 'string
+  :group 'metal-butt)
+
+(defcustom metal-butt-model nil
+  "Model used for buffer prompts, overriding the active backend's default.
+Leave nil to use `metal-butt-claude-model' or `metal-butt-copilot-model',
+whichever matches `metal-butt-backend' — see `metal-butt-default-model'.
+Set this only if you want the same non-default model on every prompt
+regardless of backend, which is unusual since the two CLIs use different
+model name spellings (\"sonnet\" versus \"claude-sonnet-5\", for instance)."
+  :type '(choice (const :tag "Use the active backend's default" nil) string)
+  :group 'metal-butt)
+
+(defun metal-butt-default-model ()
+  "Return the active backend's default model.
+`metal-butt-copilot-model' for `copilot', `metal-butt-claude-model'
+otherwise."
+  (if (eq metal-butt-backend 'copilot)
+      metal-butt-copilot-model
+    metal-butt-claude-model))
+
+(defun metal-butt-active-model ()
+  "Return the model to use when nothing more specific overrides it.
+`metal-butt-model' wins if the user has set it; otherwise the active
+backend's own default, from `metal-butt-default-model'.  This is itself
+the least specific tier of `metal-butt-effective-model' in metal-butt.el —
+an @model directive or a buffer-local `metal-butt-set-model' both outrank
+it."
+  (or metal-butt-model (metal-butt-default-model)))
+
 (defcustom metal-butt-known-models '("haiku" "sonnet" "opus" "fable")
-  "Model names accepted from an @model directive or `metal-butt-set-model'.
-Checked locally so a typo fails at once, rather than becoming an API call
-that can take a minute to be refused.  Extend this if you use a model name
-that is not listed."
+  "Model names accepted from an @model directive or `metal-butt-set-model'
+when `metal-butt-backend' is `claude'.  Checked locally so a typo fails at
+once, rather than becoming an API call that can take a minute to be
+refused.  Extend this if you use a model name that is not listed.
+See `metal-butt-copilot-known-models' for the Copilot backend's list, which
+is not enforced the way this one is."
   :type '(repeat string)
   :group 'metal-butt)
 
+(defun metal-butt-active-known-models ()
+  "Return the model names offered for completion by the active backend."
+  (if (eq metal-butt-backend 'copilot)
+      metal-butt-copilot-known-models
+    metal-butt-known-models))
+
 (defun metal-butt-check-model (model)
-  "Signal an error unless MODEL is in `metal-butt-known-models'.
-Return MODEL when it is valid."
-  (unless (member model metal-butt-known-models)
-    (error "Metal Butt: unknown model %S; known models are %s"
-           model (mapconcat #'identity metal-butt-known-models ", ")))
-  model)
+  "Validate MODEL against the active backend and return it unchanged.
+The Claude backend enforces membership in `metal-butt-known-models',
+because a typo there becomes an API call that can take a minute to be
+refused.  The Copilot backend does not: see
+`metal-butt-copilot-check-model' for why."
+  (if (eq metal-butt-backend 'copilot)
+      (metal-butt-copilot-check-model model)
+    (unless (member model metal-butt-known-models)
+      (error "Metal Butt: unknown model %S; known models are %s"
+             model (mapconcat #'identity metal-butt-known-models ", ")))
+    model))
 
 (defcustom metal-butt-request-timeout 60
   "Seconds to wait for a response before abandoning the request.
@@ -51,26 +110,23 @@ which is indistinguishable from a hang."
   :type '(choice (const :tag "Wait indefinitely" nil) integer)
   :group 'metal-butt)
 
-(defconst metal-butt-transport-contract
-  "Respond with a single JSON object and nothing else. No prose, no code fences.
-Either {\"kind\":\"edit\",\"edits\":[{\"old\":\"...\",\"new\":\"...\",\"why\":\"...\"}]}
-where each `old' is text copied verbatim from the buffer and occurring exactly
-once in it, or {\"kind\":\"reply\",\"text\":\"...\"} when the answer is discussion
-rather than a change. Never propose an edit whose `old' you have not copied
-character-for-character from the buffer shown to you. Escape line breaks inside JSON strings as \\n; a raw line break inside a string is invalid JSON."
-  "Response contract, stated once per session via --append-system-prompt.")
+(defconst metal-butt-transport-contract metal-butt-response-contract
+  "Alias of `metal-butt-response-contract' for the Claude backend's argv.
+Kept under its historical name because it is carried on
+--append-system-prompt here, unlike the Copilot backend which prepends the
+same text to the request body.")
 
 (defvar metal-butt-transport-last-exchange nil
   "Plist recording the most recent CLI invocation, for troubleshooting.
-Keys: :argv :request :stdout :stderr :exit.  Without this a parse failure
-destroys the very evidence needed to diagnose it.")
+Keys: :argv :request :stdout :stderr :exit :duration-ms.  Without this a
+parse failure destroys the very evidence needed to diagnose it.")
 
 (defun metal-butt-transport-argv (session-id &optional create)
   "Return the argument list for a request against SESSION-ID.
 If CREATE is non-nil, use --session-id to create a session; else use --resume."
   (list "-p"
         (if create "--session-id" "--resume") session-id
-        "--model" metal-butt-model
+        "--model" (metal-butt-active-model)
         "--output-format" "json"
         "--append-system-prompt" metal-butt-transport-contract
         "--disallowedTools" "Edit,Write,NotebookEdit"))
@@ -95,7 +151,7 @@ If CREATE is non-nil, use --session-id to create a session; else use --resume."
   "Turn STDERR into an actionable diagnosis."
   (if (string-match-p "explicit deny\\|not authorized\\|AccessDenied" stderr)
       (concat
-       (format "Model %S was refused by AWS. " metal-butt-model)
+       (format "Model %S was refused by AWS. " (metal-butt-active-model))
        (if (string-match "policy/\\([A-Za-z0-9_-]+\\)" stderr)
            (format "An explicit deny in IAM policy %S is blocking it; an explicit deny cannot be overridden by adding an Allow, so that policy must be amended. "
                    (match-string 1 stderr))
@@ -134,7 +190,8 @@ the process sentinel and the timeout timer fires first wins."
          (stderr (generate-new-buffer " *metal-butt-stderr*"))
          (done nil)
          (timer nil)
-         (proc nil))
+         (proc nil)
+         (start-time (float-time)))
     (setq metal-butt-transport-last-exchange
           (list :argv (cons metal-butt-executable
                             (metal-butt-transport-argv session-id create))
@@ -153,13 +210,15 @@ the process sentinel and the timeout timer fires first wins."
              (when (memq (process-status proc) '(exit signal))
                (let ((out (with-current-buffer stdout (buffer-string)))
                      (err (with-current-buffer stderr (buffer-string)))
-                     (code (process-exit-status proc)))
+                     (code (process-exit-status proc))
+                     (duration-ms (round (* 1000 (- (float-time) start-time)))))
                  (setq metal-butt-transport-last-exchange
-                       (plist-put (plist-put (plist-put
+                       (plist-put (plist-put (plist-put (plist-put
                                               metal-butt-transport-last-exchange
                                               :stdout out)
                                              :stderr err)
-                                  :exit code))
+                                  :exit code)
+                                  :duration-ms duration-ms))
                  (kill-buffer stdout)
                  (kill-buffer stderr)
                  (unless done
@@ -209,8 +268,16 @@ caller established around this call."
 Called as (FN REQUEST SESSION-ID CALLBACK).  Rebind in tests.")
 
 (defun metal-butt-transport-send (request session-id callback)
-  "Send REQUEST for SESSION-ID via `metal-butt-transport-function'."
-  (funcall metal-butt-transport-function request session-id callback))
+  "Send REQUEST for SESSION-ID via the backend named by `metal-butt-backend'.
+The Claude backend goes through `metal-butt-transport-function', the
+injectable seam tests rebind.  The Copilot backend has its own analogous
+seam, `metal-butt-transport-copilot-function', reached via
+`metal-butt-transport-copilot-send' instead — the two backends' argv,
+wire format and error shapes differ enough that sharing one seam would
+mean every stub had to pretend to be both at once."
+  (if (eq metal-butt-backend 'copilot)
+      (metal-butt-transport-copilot-send request session-id callback)
+    (funcall metal-butt-transport-function request session-id callback)))
 
 (provide 'metal-butt-transport)
 ;;; metal-butt-transport.el ends here

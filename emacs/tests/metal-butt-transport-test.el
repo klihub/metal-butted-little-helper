@@ -25,6 +25,27 @@
   (let ((metal-butt-model "haiku"))
     (should (member "haiku" (metal-butt-transport-argv "x")))))
 
+(ert-deftest metal-butt-active-model-falls-back-to-per-backend-default ()
+  (let ((metal-butt-model nil)
+        (metal-butt-backend 'claude)
+        (metal-butt-claude-model "sonnet")
+        (metal-butt-copilot-model "claude-sonnet-5"))
+    (should (equal (metal-butt-active-model) "sonnet"))
+    (setq metal-butt-backend 'copilot)
+    (should (equal (metal-butt-active-model) "claude-sonnet-5"))))
+
+(ert-deftest metal-butt-active-model-prefers-the-explicit-override ()
+  (let ((metal-butt-model "gpt-5.4")
+        (metal-butt-backend 'copilot)
+        (metal-butt-copilot-model "claude-sonnet-5"))
+    (should (equal (metal-butt-active-model) "gpt-5.4"))))
+
+(ert-deftest metal-butt-transport-argv-uses-the-backend-default-when-unset ()
+  (let ((metal-butt-model nil)
+        (metal-butt-backend 'claude)
+        (metal-butt-claude-model "sonnet"))
+    (should (member "sonnet" (metal-butt-transport-argv "x")))))
+
 (ert-deftest metal-butt-transport-extracts-result-and-usage ()
   (let* ((json "{\"result\":\"OK\",\"total_cost_usd\":0.0042,\"usage\":{\"input_tokens\":1234}}")
          (r (metal-butt-transport--extract-result json)))
@@ -127,7 +148,8 @@
     (should (member "--flag" (plist-get metal-butt-transport-last-exchange :argv)))
     (should (equal (plist-get metal-butt-transport-last-exchange :request)
                    "the request body"))
-    (should (= 0 (plist-get metal-butt-transport-last-exchange :exit)))))
+    (should (= 0 (plist-get metal-butt-transport-last-exchange :exit)))
+    (should (natnump (plist-get metal-butt-transport-last-exchange :duration-ms)))))
 
 (ert-deftest metal-butt-transport-contract-escapes-newline-correctly ()
   "The contract must ask for \\n, not \\\\n.
@@ -154,3 +176,29 @@ failure it exists to prevent."
       (let ((metal-butt-model "opus"))
         (metal-butt-transport--run "r" "sid" (lambda (&rest _) nil))))
     (should (equal seen '("opus" "opus")))))
+
+(ert-deftest metal-butt-transport-send-uses-claude-by-default ()
+  (let* ((metal-butt-backend 'claude)
+         (called nil)
+         (metal-butt-transport-function
+          (lambda (req sid cb) (setq called (list req sid)) (funcall cb nil nil))))
+    (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil))
+    (should (equal called '("req" "sid")))))
+
+(ert-deftest metal-butt-transport-send-dispatches-to-copilot-when-configured ()
+  (let* ((metal-butt-backend 'copilot)
+         (claude-called nil)
+         (copilot-called nil)
+         (metal-butt-transport-function
+          (lambda (&rest _) (setq claude-called t)))
+         (metal-butt-transport-copilot-function
+          (lambda (req sid cb) (setq copilot-called (list req sid)) (funcall cb nil nil))))
+    (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil))
+    (should-not claude-called)
+    (should (equal copilot-called '("req" "sid")))))
+
+(ert-deftest metal-butt-check-model-dispatches-per-backend ()
+  (let ((metal-butt-backend 'claude))
+    (should-error (metal-butt-check-model "not-a-claude-model")))
+  (let ((metal-butt-backend 'copilot))
+    (should (equal "anything-nonempty" (metal-butt-check-model "anything-nonempty")))))

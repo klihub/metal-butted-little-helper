@@ -11,6 +11,21 @@
 (define-error 'metal-butt-response-invalid
   "Claude returned a response that does not match the contract")
 
+(defconst metal-butt-response-contract
+  "Respond with a single JSON object and nothing else. No prose, no code fences.
+Either {\"kind\":\"edit\",\"edits\":[{\"old\":\"...\",\"new\":\"...\",\"why\":\"...\"}]}
+where each `old' is text copied verbatim from the buffer and occurring exactly
+once in it, or {\"kind\":\"reply\",\"text\":\"...\"} when the answer is discussion
+rather than a change. Never propose an edit whose `old' you have not copied
+character-for-character from the buffer shown to you. Escape line breaks inside JSON strings as \\n; a raw line break inside a string is invalid JSON."
+  "Response contract shared by every backend.
+Owned here rather than in a transport module because this file is what
+actually parses and enforces it, and both backends must state exactly the
+same contract or their responses would need different parsers.  The Claude
+backend carries it on argv via --append-system-prompt; the Copilot backend
+has no equivalent flag that works in an arbitrary target repository without
+a per-project setup step, so it prepends this text to the request instead.")
+
 (defun metal-butt-response--fail (fmt &rest args)
   (signal 'metal-butt-response-invalid (list (apply #'format fmt args))))
 

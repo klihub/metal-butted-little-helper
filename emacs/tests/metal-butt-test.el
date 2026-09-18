@@ -159,6 +159,17 @@
       (should (equal (metal-butt-effective-model) "haiku"))
       (should (equal (metal-butt-effective-model "opus") "opus")))))
 
+(ert-deftest metal-butt-effective-model-falls-back-to-the-backend-default ()
+  "With no explicit override, each backend supplies its own default model."
+  (with-temp-buffer
+    (let ((metal-butt-model nil)
+          (metal-butt-backend 'claude)
+          (metal-butt-claude-model "sonnet")
+          (metal-butt-copilot-model "claude-sonnet-5"))
+      (should (equal (metal-butt-effective-model) "sonnet"))
+      (setq metal-butt-backend 'copilot)
+      (should (equal (metal-butt-effective-model) "claude-sonnet-5")))))
+
 (ert-deftest metal-butt-set-model-buffer-only-leaves-the-global-alone ()
   (with-temp-buffer
     (let ((metal-butt-model "sonnet"))

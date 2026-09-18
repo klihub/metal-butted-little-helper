@@ -1,6 +1,7 @@
 # Metal Butt
 
-Pair programming with Claude from inside Emacs buffers.
+Pair programming with Claude Code or GitHub Copilot CLI from inside Emacs
+buffers.
 
 Type a prompt in your buffer's own comment syntax and press `C-c b`:
 
@@ -10,13 +11,14 @@ Type a prompt in your buffer's own comment syntax and press `C-c b`:
 ```
 
 Code edits come back as an accept/reject overlay. Discussion comes back as a
-comment block under your prompt. Claude never writes to disk — your buffer is
-the source of truth, so unsaved changes are safe.
+comment block under your prompt. Neither backend ever writes to disk — your
+buffer is the source of truth, so unsaved changes are safe.
 
 ## Requirements
 
 - Emacs 30.1+
-- The `claude` CLI on `exec-path`, authenticated
+- The `claude` CLI (default backend) or the `copilot` CLI, authenticated, on
+  `exec-path`
 - A git repository (state lives under `<repo-root>/.claude/metal-butt/`)
 
 No external Elisp packages.
@@ -88,6 +90,51 @@ completion; a prefix argument sets it for the current buffer only. Most specific
 wins: an `@` token beats the buffer setting, which beats the global default. The
 mode line shows which model is active.
 
+## Backends
+
+`metal-butt-backend` selects which CLI does the work: `'claude` (the default)
+or `'copilot`. Both speak the same JSON contract described above, so overlays,
+comment replies, sessions and handoff files behave identically either way —
+only the transport underneath differs.
+
+```elisp
+(setq metal-butt-backend 'copilot)
+```
+
+A few differences follow from the CLIs themselves, not from any choice made
+here:
+
+- **Each backend has its own default model, and its own catalog.**
+  `metal-butt-claude-model` (default `"sonnet"`) and `metal-butt-copilot-model`
+  (default `"claude-sonnet-5"`) are used automatically depending on
+  `metal-butt-backend`, so switching backends does not leave you sending a
+  Claude model name to the Copilot CLI or vice versa. `metal-butt-model`
+  itself defaults to `nil` and is only an *override*: set it if you want a
+  specific model regardless of backend. Completion candidates for `C-c m`
+  come from whichever backend is active: `metal-butt-known-models` for
+  `claude` (`"sonnet"`, `"opus"`, ...) or `metal-butt-copilot-known-models`
+  for `copilot` (`"claude-sonnet-5"`, `"gpt-5.4"`, `"auto"`, ...). Setting a
+  model unknown to Claude fails immediately, since a typo there becomes a
+  wasted API call; the Copilot backend does not enforce its list locally,
+  because the CLI's own catalog changes too often to hard-code — an invalid
+  model still fails fast there, just inside the CLI instead of in Emacs.
+- **No system-prompt flag.** Claude Code accepts `--append-system-prompt`, but
+  the closest Copilot CLI equivalent (`.github/agents/<name>.md` +
+  `--agent`) needs a file to exist in whatever repository the buffer belongs
+  to, which would mean per-project setup. Instead, the Copilot backend
+  prepends the same response contract to the request body sent on stdin. This
+  costs a few extra tokens per call (mitigated by prompt caching) in exchange
+  for working in any repository without setup, matching the Claude backend.
+- **Tool permissions differ in shape.** Both backends deny file writes and
+  shell execution unconditionally (`metal-butt-copilot-deny-tools`, default
+  `("write" "shell")`, mirrors Claude's disallowed-tools list) — buffers stay
+  the sole source of truth either way.
+- **Cost is reported differently.** See [Cost](#cost) below.
+- **`/handoff` and `/sync` need no changes.** Both slash commands live under
+  `.claude/commands/` and are auto-discovered by the Copilot CLI as `md:`
+  project skills, so a Copilot terminal session started in this repo already
+  has `/handoff` and `/sync` available with no extra setup.
+
 ## Sharing context with a terminal session
 
 The buffer session and your terminal session are separate conversations that
@@ -125,20 +172,29 @@ up mid-session.
 
 ## Cost
 
-The mode line shows what each prompt cost. When a session's context gets large,
-`M-x metal-butt-roll-session` summarises it into a handoff note and starts a
-fresh session. Rolling is never automatic — it costs a full-context call, so the
-timing is yours to choose.
+With the `claude` backend, the mode line shows what each prompt cost in
+dollars. With the `copilot` backend, there is no dollar figure in the CLI's
+output, so the mode line instead shows the accumulated premium-request count
+for the last call (for example `2pr`). Either way, when a session's context
+gets large, `M-x metal-butt-roll-session` summarises it into a handoff note
+and starts a fresh session. Rolling is never automatic — it costs a
+full-context call, so the timing is yours to choose.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `metal-butt-backend` | `'claude` | Which CLI to use: `'claude` or `'copilot` |
 | `metal-butt-executable` | `"claude"` | Name or path of the Claude Code CLI |
-| `metal-butt-model` | `"sonnet"` | Model for buffer prompts |
-| `metal-butt-known-models` | `'("haiku" "sonnet" "opus" "fable")` | Accepted model names |
+| `metal-butt-copilot-executable` | `"copilot"` | Name or path of the Copilot CLI |
+| `metal-butt-model` | `nil` | Explicit model override, regardless of backend; leave `nil` to use the active backend's default |
+| `metal-butt-claude-model` | `"sonnet"` | Default model when `metal-butt-backend` is `'claude` |
+| `metal-butt-copilot-model` | `"claude-sonnet-5"` | Default model when `metal-butt-backend` is `'copilot` |
+| `metal-butt-known-models` | `'("haiku" "sonnet" "opus" "fable")` | Accepted model names for `claude` |
+| `metal-butt-copilot-known-models` | see source | Model names offered for completion for `copilot` (not enforced) |
+| `metal-butt-copilot-deny-tools` | `'("write" "shell")` | Tool categories denied to the Copilot backend |
 | `metal-butt-request-timeout` | `60` | Seconds before a request is abandoned |
-| `metal-butt-attention-words` | `'("claude")` | Words that mark a comment as a prompt |
+| `metal-butt-attention-words` | `'("claude" "mb" "metal-butt" "butty")` | Words that mark a comment as a prompt |
 | `metal-butt-prompt-search-limit` | `20` | Lines above point to search for a prompt |
 | `metal-butt-max-buffer-chars` | `20000` | Larger buffers send a window around point |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |

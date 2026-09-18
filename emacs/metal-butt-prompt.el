@@ -12,9 +12,13 @@
   :group 'tools
   :prefix "metal-butt-")
 
-(defcustom metal-butt-attention-words '("claude")
+(defcustom metal-butt-attention-words '("claude" "mb" "metal-butt" "butty")
   "Words that mark a comment as a prompt.
-Every word behaves identically — they are aliases, not modes.  A prompt is
+Every word behaves identically — they are aliases, not modes. `claude'
+stays first for backward compatibility with existing buffers/muscle
+memory; `mb', `metal-butt' and `butty' are backend-neutral spellings,
+useful now that `metal-butt-backend' can be `copilot' and \"claude:\"
+reads oddly when nothing named Claude is actually answering. A prompt is
 recognised as the comment starter, optional whitespace, one of these words,
 then a colon."
   :type '(repeat string)

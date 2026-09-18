@@ -21,6 +21,7 @@
 (require 'metal-butt-prompt)
 (require 'metal-butt-context)
 (require 'metal-butt-transport)
+(require 'metal-butt-transport-copilot)
 (require 'metal-butt-response)
 (require 'metal-butt-overlay)
 (require 'metal-butt-comment)
@@ -35,6 +36,7 @@
 (defvar-local metal-butt--in-flight nil)
 (defvar-local metal-butt--last-cost 0)
 (defvar-local metal-butt--last-input-tokens 0)
+(defvar-local metal-butt--last-premium-requests 0)
 
 (defvar-local metal-butt--buffer-model nil
   "Model for this buffer alone, set by `metal-butt-set-model' with a prefix arg.")
@@ -42,17 +44,22 @@
 (defun metal-butt-effective-model (&optional prompt-model)
   "Return the model to use, most specific setting first.
 PROMPT-MODEL comes from an @model directive, then the buffer-local setting
-from `metal-butt-set-model', then the global `metal-butt-model'."
-  (or prompt-model metal-butt--buffer-model metal-butt-model))
+from `metal-butt-set-model', then `metal-butt-active-model' (the explicit
+override `metal-butt-model' if set, else the active backend's own
+default)."
+  (or prompt-model metal-butt--buffer-model (metal-butt-active-model)))
 
 (defun metal-butt-set-model (model &optional buffer-only)
   "Set the model to MODEL, globally, or for this buffer with a prefix arg.
 Reads with completion so no elisp is needed and a typo cannot become a
-wasted API call."
+wasted API call.  Candidates come from whichever backend is active
+\(`metal-butt-known-models' for `claude', `metal-butt-copilot-known-models'
+for `copilot'\); typing a name outside that list is still accepted, since
+completion here is a convenience, not the whole validation."
   (interactive
    (list (completing-read
           (format "Model (currently %s): " (metal-butt-effective-model))
-          metal-butt-known-models nil nil)
+          (metal-butt-active-known-models) nil nil)
          current-prefix-arg))
   (metal-butt-check-model model)
   (if buffer-only
@@ -111,7 +118,8 @@ discarded response does not consume pending handoff context."
       (cond
        (error
         (setq metal-butt--last-cost 0
-              metal-butt--last-input-tokens 0)
+              metal-butt--last-input-tokens 0
+              metal-butt--last-premium-requests 0)
         (force-mode-line-update)
         (message "Metal Butt: %s" error))
        ((and (/= tick (buffer-chars-modified-tick))
@@ -119,7 +127,8 @@ discarded response does not consume pending handoff context."
         (message "Metal Butt: buffer changed while the request was in flight; response discarded"))
        (t
         (setq metal-butt--last-cost (plist-get result :cost)
-              metal-butt--last-input-tokens (plist-get result :input-tokens))
+              metal-butt--last-input-tokens (plist-get result :input-tokens)
+              metal-butt--last-premium-requests (or (plist-get result :premium-requests) 0))
         (condition-case e
             (metal-butt--apply (metal-butt-response-parse (plist-get result :text)) prompt)
           (metal-butt-response-invalid
@@ -196,9 +205,13 @@ as an accept/reject overlay.  A leading @model directive works here too."
 (defun metal-butt-show-last-exchange ()
   "Show the raw request and response of the most recent CLI invocation.
 The place to look when a response fails to parse: the payload is otherwise
-discarded along with the process buffers."
+discarded along with the process buffers.  Shows whichever backend is
+active's record: `metal-butt-transport-last-exchange' for `claude',
+`metal-butt-transport-copilot-last-exchange' for `copilot'."
   (interactive)
-  (let ((exchange metal-butt-transport-last-exchange))
+  (let ((exchange (if (eq metal-butt-backend 'copilot)
+                      metal-butt-transport-copilot-last-exchange
+                    metal-butt-transport-last-exchange)))
     (if (null exchange)
         (message "Metal Butt: no exchange recorded yet")
       (with-current-buffer (get-buffer-create "*metal-butt-last-exchange*")
@@ -208,6 +221,10 @@ discarded along with the process buffers."
           (dolist (a (plist-get exchange :argv))
             (insert (format "  %s\n" a)))
           (insert (format "\n=== exit code ===\n  %S\n" (plist-get exchange :exit)))
+          (insert (format "\n=== duration ===\n  %s\n"
+                          (if (plist-get exchange :duration-ms)
+                              (format "%.1fs" (/ (plist-get exchange :duration-ms) 1000.0))
+                            "unknown")))
           (insert "\n=== request sent on stdin ===\n")
           (insert (or (plist-get exchange :request) ""))
           (insert "\n\n=== raw stdout ===\n")
@@ -221,8 +238,9 @@ discarded along with the process buffers."
 (defconst metal-butt--modules
   '("metal-butt-prompt"
     "metal-butt-context"
-    "metal-butt-transport"
     "metal-butt-response"
+    "metal-butt-transport-copilot"
+    "metal-butt-transport"
     "metal-butt-overlay"
     "metal-butt-comment"
     "metal-butt-session"
@@ -263,12 +281,17 @@ yourself.")
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode
-  "Prompt Claude from this buffer's comments."
+  "Prompt Claude or Copilot from this buffer's comments."
   :lighter (:eval (format " MB[%s]%s"
                           (metal-butt-effective-model)
-                          (if (> metal-butt--last-cost 0)
-                              (format " $%.4f" metal-butt--last-cost)
-                            "")))
+                          (cond
+                           ((eq metal-butt-backend 'copilot)
+                            (if (> metal-butt--last-premium-requests 0)
+                                (format " %dpr" metal-butt--last-premium-requests)
+                              ""))
+                           ((> metal-butt--last-cost 0)
+                            (format " $%.4f" metal-butt--last-cost))
+                           (t ""))))
   :keymap metal-butt-mode-map)
 
 (provide 'metal-butt)
