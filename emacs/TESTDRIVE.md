@@ -157,25 +157,36 @@ press `C-c C-a`.** `C-c C-r` rejects it.
 - Terminal-side handoff: `/handoff` and `/sync` slash commands under
   `.claude/commands/`.
 
-## What has never been run
+## What real use found
 
-**No part of this has made a real API call in a real editor.** The suite is
-comprehensive but everything is stubbed, so the first genuine `C-c b` is yours to
-press. That is the one thing I could not do for you overnight, and it is where
-surprises will surface — most likely in how well the model sticks to the JSON
-response contract in practice.
+Confirmed working in a real editor on 2026-09-18: replies as comment blocks,
+edits as overlays, accept, reject, and multi-line edits.
 
-A Markdown code fence around the JSON is tolerated, since models add them even
-when told not to. But if a response comes back as prose rather than JSON, you
-will see a "does not match the contract" message rather than a mangled buffer.
-That is the design working — but it would mean the wording of
-`metal-butt-transport-contract` needs tightening, which is the single most likely
-thing to need adjusting after your first session.
+Two bugs surfaced on first use, both now fixed with tests pinning them:
+
+- **Raw line breaks inside JSON strings.** The model writes a literal newline
+  inside `old`/`new` when the quoted text spans lines, which is invalid JSON. Not
+  an edge case — it is what happens for *any* edit longer than one line.
+  Responses are now repaired before parsing; the transformation is a no-op on
+  valid JSON, so it can only widen what parses.
+- **No timeout.** The spec listed one and nothing implemented it. An
+  authorization denial that the CLI retried with backoff took 190 seconds to
+  surface, which was indistinguishable from a hang. Now bounded by
+  `metal-butt-request-timeout`.
+
+Markdown code fences around the JSON were already tolerated and were not the
+problem. If a response ever comes back as genuine prose you will get a clear
+refusal rather than a mangled buffer, and
+`M-x metal-butt-show-last-exchange` shows the exact payload.
+
+The likeliest thing still needing adjustment is contract wording — specifically
+whether the model copies `old` character-for-character, including indentation.
+A near-miss shows up as "no match for: …", which is the guard working.
 
 ## Tests
 
 ```sh
-make check      # 98 tests, zero API calls, costs nothing
+make check      # 106 tests, zero API calls, costs nothing
 make compile    # byte-compile, warnings are errors
 ```
 

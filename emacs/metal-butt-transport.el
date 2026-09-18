@@ -160,7 +160,7 @@ the process sentinel and the timeout timer fires first wins."
                  (setq done t)
                  (when (process-live-p proc) (kill-process proc))
                  (funcall callback nil
-                          (format "no response after %d seconds; request abandoned"
+                          (format "no response after %d seconds; request abandoned (M-x metal-butt-show-last-exchange shows what was sent)"
                                   metal-butt-request-timeout)
                           nil))))))
     (process-send-string proc request)
