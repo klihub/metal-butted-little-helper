@@ -209,6 +209,66 @@ failure it exists to prevent."
     (should-not claude-called)
     (should (equal copilot-api-called '("req" "sid")))))
 
+(ert-deftest metal-butt-copilot-api-unavailable-error-p-matches-known-shapes ()
+  (should (metal-butt-copilot-api--unavailable-error-p
+           "no GitHub token at ~/.config/copilot-chat/github-token -- log in with copilot-chat once"))
+  (should (metal-butt-copilot-api--unavailable-error-p
+           "token exchange timed out or failed to connect"))
+  (should (metal-butt-copilot-api--unavailable-error-p
+           "curl failed (exit 7): Couldn't connect to server")))
+
+(ert-deftest metal-butt-copilot-api-unavailable-error-p-rejects-other-errors ()
+  (should-not (metal-butt-copilot-api--unavailable-error-p
+               "model_not_supported"))
+  (should-not (metal-butt-copilot-api--unavailable-error-p
+               "unparseable chat completion response: bad JSON"))
+  (should-not (metal-butt-copilot-api--unavailable-error-p nil)))
+
+(ert-deftest metal-butt-transport-send-falls-back-to-copilot-cli-when-copilot-api-is-unavailable ()
+  (let* ((metal-butt-backend 'copilot-api)
+         (metal-butt--copilot-api-fallback-warned nil)
+         (copilot-cli-called nil)
+         (result nil)
+         (metal-butt-transport-copilot-api-function
+          (lambda (_req _sid cb &optional _progress)
+            (funcall cb nil "no GitHub token at ~/foo -- log in with copilot-chat once")))
+         (metal-butt-transport-copilot-function
+          (lambda (req sid cb)
+            (setq copilot-cli-called (list req sid))
+            (funcall cb (list :text "answer from the CLI") nil))))
+    (metal-butt-transport-send "req" "sid" (lambda (r _e) (setq result r)))
+    (should (equal copilot-cli-called '("req" "sid")))
+    (should (equal (plist-get result :text) "answer from the CLI"))))
+
+(ert-deftest metal-butt-transport-send-warns-only-once-for-repeated-fallbacks ()
+  (let* ((metal-butt-backend 'copilot-api)
+         (metal-butt--copilot-api-fallback-warned nil)
+         (messages nil)
+         (metal-butt-transport-copilot-api-function
+          (lambda (_req _sid cb &optional _progress)
+            (funcall cb nil "curl failed (exit 7): could not connect")))
+         (metal-butt-transport-copilot-function
+          (lambda (_req _sid cb) (funcall cb (list :text "ok") nil))))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+      (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil))
+      (metal-butt-transport-send "req" "sid" (lambda (&rest _) nil)))
+    (should (= 1 (length (seq-filter (lambda (m) (string-match-p "falling back" m)) messages))))))
+
+(ert-deftest metal-butt-transport-send-does-not-fall-back-for-a-genuine-answer-error ()
+  (let* ((metal-butt-backend 'copilot-api)
+         (metal-butt--copilot-api-fallback-warned nil)
+         (copilot-cli-called nil)
+         (result-error nil)
+         (metal-butt-transport-copilot-api-function
+          (lambda (_req _sid cb &optional _progress)
+            (funcall cb nil "model_not_supported")))
+         (metal-butt-transport-copilot-function
+          (lambda (req sid cb) (setq copilot-cli-called (list req sid)) (funcall cb nil nil))))
+    (metal-butt-transport-send "req" "sid" (lambda (_r e) (setq result-error e)))
+    (should-not copilot-cli-called)
+    (should (equal result-error "model_not_supported"))))
+
 (ert-deftest metal-butt-check-model-dispatches-per-backend ()
   (let ((metal-butt-backend 'claude))
     (should-error (metal-butt-check-model "not-a-claude-model")))

@@ -225,6 +225,17 @@ token), it just logs a message — the next request's lazy renewal still
 covers for it. Set `metal-butt-copilot-api-token-prefetch-margin` to `0` to
 disable proactive refresh and go back to the old lazy-only behaviour.
 
+When `copilot-api` itself is unavailable — no cached GitHub token file, the
+token exchange failing to connect, or curl failing to reach the
+chat/completions endpoint at all — a request automatically falls back to
+the `copilot` CLI backend instead of erroring out, since the CLI needs no
+separate GitHub token and is far less likely to be down for the same
+reason at the same time. A one-time message notes the fallback happened;
+it is not repeated on every subsequent request while the underlying
+problem persists. This only covers backend-unavailability failures — a
+genuine answer-level error (an unsupported model, a malformed response
+body) still surfaces normally, since switching backends would not fix it.
+
 A few differences follow from the CLIs themselves, not from any choice made
 here:
 

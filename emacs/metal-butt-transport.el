@@ -276,6 +276,13 @@ caller established around this call."
   "Function used to reach Claude.
 Called as (FN REQUEST SESSION-ID CALLBACK).  Rebind in tests.")
 
+(defvar metal-butt--copilot-api-fallback-warned nil
+  "Non-nil once the one-time fallback warning has been shown this session.
+Reset by nothing -- the point is to warn once per Emacs session that
+`copilot-api' is unavailable and requests are going through the `copilot'
+CLI instead, not to nag on every single fallback while the underlying
+problem (missing token file, network outage) persists.")
+
 (defun metal-butt-transport-send (request session-id callback &optional progress)
   "Send REQUEST for SESSION-ID via the backend named by `metal-butt-backend'.
 The Claude backend goes through `metal-butt-transport-function', the
@@ -292,10 +299,34 @@ called zero or more times before CALLBACK, as streamed output arrives.
 Only `copilot-api' currently streams; the `claude' and `copilot' CLI
 backends silently ignore PROGRESS rather than erroring, since their
 non-interactive output modes don't produce incremental text deltas the
-same way (a possible future improvement, not yet implemented)."
+same way (a possible future improvement, not yet implemented).
+
+When `metal-butt-backend' is `copilot-api' and a request fails in a way
+`metal-butt-copilot-api--unavailable-error-p' recognises as the backend
+itself being unavailable (no cached GitHub token, a connection failure
+exchanging it, or curl failing to reach the endpoint at all) rather than
+a genuine answer-level error, this transparently retries the same
+request once through the `copilot' CLI backend instead of surfacing the
+error to the user, since the CLI backend needs no separate GitHub token
+of its own and is far less likely to be down at the same time. A single
+one-time message notes the fallback happened, so it is visible but not
+repeated on every subsequent request while the underlying problem
+persists."
   (pcase metal-butt-backend
     ('copilot (metal-butt-transport-copilot-send request session-id callback))
-    ('copilot-api (metal-butt-transport-copilot-api-send request session-id callback progress))
+    ('copilot-api
+     (metal-butt-transport-copilot-api-send
+      request session-id
+      (lambda (result error)
+        (if (and error (metal-butt-copilot-api--unavailable-error-p error))
+            (progn
+              (unless metal-butt--copilot-api-fallback-warned
+                (setq metal-butt--copilot-api-fallback-warned t)
+                (message "Metal Butt: copilot-api unavailable (%s); falling back to the copilot CLI for this request"
+                         error))
+              (metal-butt-transport-copilot-send request session-id callback))
+          (funcall callback result error)))
+      progress))
     (_ (funcall metal-butt-transport-function request session-id callback))))
 
 (provide 'metal-butt-transport)

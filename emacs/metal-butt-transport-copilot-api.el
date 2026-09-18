@@ -426,5 +426,19 @@ PROGRESS, if given, is forwarded as the streaming-progress callback; see
 `metal-butt-transport-copilot-api--launch'."
   (funcall metal-butt-transport-copilot-api-function request session-id callback progress))
 
+(defun metal-butt-copilot-api--unavailable-error-p (error-string)
+  "Non-nil if ERROR-STRING indicates the `copilot-api' backend is simply
+unavailable right now, as opposed to an error that switching backends
+would not fix (a rejected model name, a malformed response body, an API
+error message from Copilot itself, and so on).  Matches: a missing
+GitHub token file, the token-exchange call failing to connect, or curl
+itself failing to reach the chat/completions endpoint -- curl reports a
+non-zero exit only for a connection-level failure, since an HTTP-level
+error from the API comes back as a 200-exit-code response body instead."
+  (and (stringp error-string)
+       (string-match-p
+        "no GitHub token at\\|token exchange timed out or failed to connect\\|curl failed (exit"
+        error-string)))
+
 (provide 'metal-butt-transport-copilot-api)
 ;;; metal-butt-transport-copilot-api.el ends here
