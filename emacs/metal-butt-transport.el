@@ -41,8 +41,13 @@ Either {\"kind\":\"edit\",\"edits\":[{\"old\":\"...\",\"new\":\"...\",\"why\":\"
 where each `old' is text copied verbatim from the buffer and occurring exactly
 once in it, or {\"kind\":\"reply\",\"text\":\"...\"} when the answer is discussion
 rather than a change. Never propose an edit whose `old' you have not copied
-character-for-character from the buffer shown to you."
+character-for-character from the buffer shown to you. Escape line breaks inside JSON strings as \\n; a raw line break inside a string is invalid JSON."
   "Response contract, stated once per session via --append-system-prompt.")
+
+(defvar metal-butt-transport-last-exchange nil
+  "Plist recording the most recent CLI invocation, for troubleshooting.
+Keys: :argv :request :stdout :stderr :exit.  Without this a parse failure
+destroys the very evidence needed to diagnose it.")
 
 (defun metal-butt-transport-argv (session-id &optional create)
   "Return the argument list for a request against SESSION-ID.
@@ -114,6 +119,10 @@ the process sentinel and the timeout timer fires first wins."
          (done nil)
          (timer nil)
          (proc nil))
+    (setq metal-butt-transport-last-exchange
+          (list :argv (cons metal-butt-executable
+                            (metal-butt-transport-argv session-id create))
+                :request request))
     (setq proc
           (make-process
            :name "metal-butt"
@@ -129,6 +138,12 @@ the process sentinel and the timeout timer fires first wins."
                (let ((out (with-current-buffer stdout (buffer-string)))
                      (err (with-current-buffer stderr (buffer-string)))
                      (code (process-exit-status proc)))
+                 (setq metal-butt-transport-last-exchange
+                       (plist-put (plist-put (plist-put
+                                              metal-butt-transport-last-exchange
+                                              :stdout out)
+                                             :stderr err)
+                                  :exit code))
                  (kill-buffer stdout)
                  (kill-buffer stderr)
                  (unless done

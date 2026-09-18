@@ -34,11 +34,33 @@ still unambiguously the response that was asked for."
           (replace-regexp-in-string "\\````[a-zA-Z]*[ \t]*\n?" "" text)))
       text)))
 
+(defun metal-butt-response--escape-raw-controls (json)
+  "Escape raw control characters that appear inside JSON string literals.
+Models emit a literal line break inside a string when the text they are
+quoting spans lines, which is invalid JSON.  This is a no-op on valid JSON,
+because a raw line break inside a string is never legal there, so it can
+only widen what parses.  Line breaks BETWEEN tokens, as in pretty-printed
+JSON, are outside strings and are left alone."
+  (let ((in-string nil)
+        (escaped nil)
+        (acc nil))
+    (dolist (c (append json nil))
+      (cond
+       (escaped (push c acc) (setq escaped nil))
+       ((eq c ?\\) (push c acc) (setq escaped t))
+       ((eq c ?\") (push c acc) (setq in-string (not in-string)))
+       ((and in-string (eq c ?\n)) (push ?\\ acc) (push ?n acc))
+       ((and in-string (eq c ?\r)) (push ?\\ acc) (push ?r acc))
+       ((and in-string (eq c ?\t)) (push ?\\ acc) (push ?t acc))
+       (t (push c acc))))
+    (concat (nreverse acc))))
+
 (defun metal-butt-response-parse (json)
   "Parse JSON against the response contract.
 Signal `metal-butt-response-invalid' if it does not conform."
   (let ((data (condition-case err
-                  (json-parse-string (metal-butt-response--strip-fences json)
+                  (json-parse-string (metal-butt-response--escape-raw-controls
+                                      (metal-butt-response--strip-fences json))
                                      :object-type 'alist
                                      :null-object nil :false-object nil)
                 (error (metal-butt-response--fail "unparseable JSON: %s"

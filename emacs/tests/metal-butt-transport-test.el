@@ -109,3 +109,30 @@
     (should (listp outcome))
     (should-not (nth 0 outcome))
     (should (string-match-p "no response after 1 seconds" (nth 1 outcome)))))
+
+(ert-deftest metal-butt-transport-records-the-exchange ()
+  "A parse failure must not destroy the evidence needed to diagnose it."
+  (let ((metal-butt-executable "true")
+        (metal-butt-request-timeout 5)
+        (metal-butt-transport-last-exchange nil)
+        (finished nil))
+    (cl-letf (((symbol-function 'metal-butt-transport-argv)
+               (lambda (&rest _) (list "--flag"))))
+      (metal-butt-transport--run
+       "the request body" "some-session"
+       (lambda (&rest _) (setq finished t)))
+      (let ((deadline (+ (float-time) 5)))
+        (while (and (not finished) (< (float-time) deadline))
+          (sit-for 0.05))))
+    (should (member "--flag" (plist-get metal-butt-transport-last-exchange :argv)))
+    (should (equal (plist-get metal-butt-transport-last-exchange :request)
+                   "the request body"))
+    (should (= 0 (plist-get metal-butt-transport-last-exchange :exit)))))
+
+(ert-deftest metal-butt-transport-contract-escapes-newline-correctly ()
+  "The contract must ask for \\n, not \\\\n.
+Two backslashes decode to a literal backslash-then-n, which could never
+match text in the user's buffer, so the instruction would cause the very
+failure it exists to prevent."
+  (should (string-search "as \\n;" metal-butt-transport-contract))
+  (should-not (string-search "as \\\\n;" metal-butt-transport-contract)))

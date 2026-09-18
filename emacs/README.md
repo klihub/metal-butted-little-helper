@@ -94,6 +94,17 @@ prefix and pays for a summarisation call, so it is not always cheaper.
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
 
+## Troubleshooting
+
+If a response fails to parse, `M-x metal-butt-show-last-exchange` shows the exact
+argv, the request sent on stdin, and the raw stdout and stderr of the last CLI
+invocation.
+
+Responses are parsed tolerantly: a Markdown code fence around the JSON is
+stripped, and raw line breaks inside JSON strings are escaped, since models
+produce both despite instructions. Neither transformation changes the meaning of
+valid JSON.
+
 ## Tests
 
 ```sh
@@ -102,4 +113,4 @@ make compile    # byte-compile, warnings are errors
 ```
 
 The transport is injectable, so the whole pipeline is tested against a stub and
-the suite costs nothing to run. 91 tests pass.
+the suite costs nothing to run. 99 tests pass.

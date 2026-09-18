@@ -69,7 +69,9 @@ Does nothing if BUFFER was killed while the request was in flight."
               metal-butt--last-input-tokens (plist-get result :input-tokens))
         (condition-case e
             (metal-butt--apply (metal-butt-response-parse (plist-get result :text)) prompt)
-          (metal-butt-response-invalid (message "Metal Butt: %s" (cadr e)))
+          (metal-butt-response-invalid
+           (message "Metal Butt: %s (M-x metal-butt-show-last-exchange to see the payload)"
+                    (cadr e)))
           (metal-butt-overlay-no-match (message "Metal Butt: %s" (cadr e)))
           (metal-butt-overlay-ambiguous (message "Metal Butt: %s" (cadr e))))
         (force-mode-line-update)
@@ -106,6 +108,31 @@ Does nothing if BUFFER was killed while the request was in flight."
   "Summarise this session into a handoff note and start a fresh generation."
   (interactive)
   (metal-butt-session-roll (metal-butt-repo-root)))
+
+(defun metal-butt-show-last-exchange ()
+  "Show the raw request and response of the most recent CLI invocation.
+The place to look when a response fails to parse: the payload is otherwise
+discarded along with the process buffers."
+  (interactive)
+  (let ((exchange metal-butt-transport-last-exchange))
+    (if (null exchange)
+        (message "Metal Butt: no exchange recorded yet")
+      (with-current-buffer (get-buffer-create "*metal-butt-last-exchange*")
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert "=== argv ===\n")
+          (dolist (a (plist-get exchange :argv))
+            (insert (format "  %s\n" a)))
+          (insert (format "\n=== exit code ===\n  %S\n" (plist-get exchange :exit)))
+          (insert "\n=== request sent on stdin ===\n")
+          (insert (or (plist-get exchange :request) ""))
+          (insert "\n\n=== raw stdout ===\n")
+          (insert (or (plist-get exchange :stdout) ""))
+          (insert "\n\n=== raw stderr ===\n")
+          (insert (or (plist-get exchange :stderr) ""))
+          (goto-char (point-min)))
+        (view-mode 1))
+      (display-buffer "*metal-butt-last-exchange*"))))
 
 (defvar metal-butt-mode-map
   (let ((map (make-sparse-keymap)))

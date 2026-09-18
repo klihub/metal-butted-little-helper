@@ -59,3 +59,31 @@
   "Tolerating fences must not turn into tolerating anything."
   (should-error (metal-butt-response-parse "Here you go: not json")
                 :type 'metal-butt-response-invalid))
+
+(ert-deftest metal-butt-response-repairs-raw-newline-in-a-string ()
+  "The model writes a literal line break inside a multi-line `old'."
+  (let* ((r (metal-butt-response-parse
+             "{\"kind\":\"edit\",\"edits\":[{\"old\":\"int a = 1;\nreturn a;\",\"new\":\"x\"}]}"))
+         (e (car (plist-get r :edits))))
+    (should (equal (plist-get e :old) "int a = 1;\nreturn a;"))))
+
+(ert-deftest metal-butt-response-repairs-raw-newline-inside-fences ()
+  (let* ((r (metal-butt-response-parse
+             "```json\n{\"kind\":\"reply\",\"text\":\"line one\nline two\"}\n```")))
+    (should (equal (plist-get r :text) "line one\nline two"))))
+
+(ert-deftest metal-butt-response-leaves-pretty-printed-json-alone ()
+  "Line breaks BETWEEN tokens are outside strings and must not be touched."
+  (let ((r (metal-butt-response-parse
+            "{\n  \"kind\": \"reply\",\n  \"text\": \"fine\"\n}")))
+    (should (equal (plist-get r :text) "fine"))))
+
+(ert-deftest metal-butt-response-repair-is-a-noop-on-valid-json ()
+  (let ((valid "{\"kind\":\"reply\",\"text\":\"a\\nb\"}"))
+    (should (equal (metal-butt-response--escape-raw-controls valid) valid))))
+
+(ert-deftest metal-butt-response-repair-handles-escaped-quotes ()
+  "An escaped quote must not be mistaken for the end of a string."
+  (let ((r (metal-butt-response-parse
+            "{\"kind\":\"reply\",\"text\":\"he said \\\"hi\\\" then\nleft\"}")))
+    (should (equal (plist-get r :text) "he said \"hi\" then\nleft"))))
