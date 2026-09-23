@@ -68,6 +68,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c h r` | Reject just the current hunk, then advance to the next |
 | `C-c C-d` | Toggle the current hunk between full-region and diff-style view |
 | `C-c C-e` | Review every remaining proposed edit at once in Ediff |
+| `C-c C-TAB` | Complete or write code at point (`'copilot-api` only) |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 | `C-c s` | Show backend, model, session id, and last-exchange status |
 | `C-c t` | Retry the last prompt (prefix arg: choose a different model) |
@@ -161,6 +162,38 @@ the rest of this edit set — so `metal-butt-accept`/`metal-butt-reject`
 and the per-hunk commands above no longer apply once you are in an Ediff
 session. Quitting Ediff (`q`) kills the scratch buffer and leaves this
 buffer holding whatever combination you chose.
+
+## Completing code at point
+
+`C-c C-TAB` (`metal-butt-complete-at-point`) asks the model to complete or
+write code right where point is, and the proposal comes back through the
+exact same review flow as any other proposed edit: accept/reject,
+hunk-by-hunk, the full/diff style toggle, or the whole-changeset Ediff view
+all work on it unchanged.
+
+Only implemented for `metal-butt-backend` `'copilot-api` so far. Every other
+request in the package resends the whole buffer (or a window around point)
+on every single call, which is fine for an occasional ask or edit but would
+make a completion command meant to be triggered often too slow and too
+expensive: `'claude` and `'copilot` both shell out to a CLI that pays a
+large, mostly fixed per-invocation cost (see "Backends" above), and neither
+gives a way to hand it a growing, explicit conversation directly the way
+`'copilot-api`'s `chat/completions` endpoint does. So this feature keeps its
+own persistent, buffer-local chat session instead: the whole buffer is sent
+only once, up front, and every later completion sends a compact unified
+diff of what changed since the previous turn plus the current point,
+relying on the model's own memory of the conversation for everything that
+has not changed. That history is bounded by `metal-butt-complete-max-turns`
+and `metal-butt-complete-max-history-chars`; once either limit is hit, the
+next completion resyncs by resending the whole buffer and dropping
+everything before it, the same trade `M-x metal-butt-roll-session` makes
+for the ask/edit conversation, just automatic and local to this buffer.
+
+```elisp
+(setq metal-butt-backend 'copilot-api)
+;; ... then, with point wherever you want code completed or written:
+;; M-x metal-butt-complete-at-point, or C-c C-TAB
+```
 
 ## Choosing a model
 
@@ -422,6 +455,8 @@ nil to turn logging off entirely.
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
 | `metal-butt-log-enabled` | `t` | Log requests/results/fallbacks to `*metal-butt events*` (`C-c l`) |
 | `metal-butt-log-max-chars` | `200000` | Approximate cap on the events log buffer's size before oldest lines are dropped |
+| `metal-butt-complete-max-turns` | `20` | Turns before `C-c C-TAB` resyncs by resending the whole buffer (`'copilot-api` only) |
+| `metal-butt-complete-max-history-chars` | `40000` | Accumulated completion-history size before a resync (`'copilot-api` only) |
 
 ## Troubleshooting
 

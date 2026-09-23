@@ -29,6 +29,7 @@
 (require 'metal-butt-comment)
 (require 'metal-butt-session)
 (require 'metal-butt-handoff)
+(require 'metal-butt-complete)
 
 (defcustom metal-butt-delete-prompt-after-send nil
   "When non-nil, remove the prompt comment once it has been answered."
@@ -502,6 +503,7 @@ variables and `metal-butt-show-last-exchange', in one place."
     "metal-butt-comment"
     "metal-butt-session"
     "metal-butt-handoff"
+    "metal-butt-complete"
     "metal-butt")
   "Every file of the package, entry point last.
 `metal-butt-reload' walks this list, so a new module added to the package
@@ -544,6 +546,7 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c s") #'metal-butt-status)
 (define-key metal-butt-mode-map (kbd "C-c t") #'metal-butt-retry)
 (define-key metal-butt-mode-map (kbd "C-c l") #'metal-butt-show-log)
+(define-key metal-butt-mode-map (kbd "C-c C-TAB") #'metal-butt-complete-at-point)
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode
