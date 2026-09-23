@@ -547,6 +547,7 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c t") #'metal-butt-retry)
 (define-key metal-butt-mode-map (kbd "C-c l") #'metal-butt-show-log)
 (define-key metal-butt-mode-map (kbd "C-c C-TAB") #'metal-butt-complete-at-point)
+(define-key metal-butt-mode-map (kbd "C-c TAB") #'metal-butt-toggle-autocomplete)
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode

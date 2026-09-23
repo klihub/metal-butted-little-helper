@@ -69,6 +69,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c C-d` | Toggle the current hunk between full-region and diff-style view |
 | `C-c C-e` | Review every remaining proposed edit at once in Ediff |
 | `C-c C-TAB` | Complete or write code at point (`'copilot-api` only) |
+| `C-c TAB` | Toggle idle-triggered autocomplete for this buffer, off by default (prefix arg: adjust it instead) |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 | `C-c s` | Show backend, model, session id, and last-exchange status |
 | `C-c t` | Retry the last prompt (prefix arg: choose a different model) |
@@ -194,6 +195,23 @@ for the ask/edit conversation, just automatic and local to this buffer.
 ;; ... then, with point wherever you want code completed or written:
 ;; M-x metal-butt-complete-at-point, or C-c C-TAB
 ```
+
+`C-c TAB` (`metal-butt-toggle-autocomplete`) turns on an idle-triggered
+version of the same command for the current buffer — off by default
+everywhere. Once on, an edit re-arms a `metal-butt-autocomplete-idle-delay`
+(default 1 second) idle timer, and letting it expire fires
+`metal-butt-complete-at-point` silently, proposing its result through the
+exact same review flow as a manual completion. It never fires while a
+request is already in flight, or while an earlier proposal (auto-triggered
+or not) is still awaiting review, so it can never pile a second, unrequested
+proposal on top of one you have not looked at yet.
+
+With a prefix argument, `C-c TAB` prompts for one of two adjustments to a
+*running* autocomplete instead of toggling it: "suppress until I type more"
+pauses auto-triggering until the buffer actually changes again (not merely
+until some time passes — handy for "not right now" without turning the
+whole thing off), and "increase the idle delay" raises the delay for this
+buffer only.
 
 ## Choosing a model
 
@@ -457,6 +475,7 @@ nil to turn logging off entirely.
 | `metal-butt-log-max-chars` | `200000` | Approximate cap on the events log buffer's size before oldest lines are dropped |
 | `metal-butt-complete-max-turns` | `20` | Turns before `C-c C-TAB` resyncs by resending the whole buffer (`'copilot-api` only) |
 | `metal-butt-complete-max-history-chars` | `40000` | Accumulated completion-history size before a resync (`'copilot-api` only) |
+| `metal-butt-autocomplete-idle-delay` | `1` | Idle seconds after an edit before auto-triggering a completion, once `C-c TAB` has turned it on for a buffer |
 
 ## Troubleshooting
 

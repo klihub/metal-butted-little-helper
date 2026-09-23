@@ -256,5 +256,152 @@ trigger."
      (lambda (result error)
        (metal-butt-complete--handle buffer message text tick result error interactive)))))
 
+(defcustom metal-butt-autocomplete-idle-delay 1
+  "Seconds of idle time after an edit before auto-triggering a completion.
+Only takes effect once `metal-butt-toggle-autocomplete' has been turned on
+for a buffer -- off by default everywhere.  Each trigger is a real network
+request against a quota (`premiumRequests'), not a free local computation
+the way copilot.el's ghost-text completion is, so this is deliberately
+much larger than that package's near-zero `copilot-idle-delay' default."
+  :type 'number
+  :group 'metal-butt)
+
+(defvar-local metal-butt-complete--autocomplete-enabled nil
+  "Non-nil while idle-triggered autocomplete is turned on for this buffer.")
+
+(defvar-local metal-butt-complete--autocomplete-timer nil
+  "Pending idle timer for the next auto-triggered completion, or nil.")
+
+(defvar-local metal-butt-complete--autocomplete-last-tick nil
+  "Modified-tick as of the last `metal-butt-complete--post-command' call.
+Compared against the current tick on each call so a timer is only
+(re)armed when the buffer was actually edited since the last one -- an
+idle-triggered completion re-describing an unchanged buffer just because
+point moved would waste a request for nothing.")
+
+(defvar-local metal-butt-complete--autocomplete-suppressed-tick nil
+  "Modified-tick recorded when autocomplete was paused, or nil when not.
+Non-nil pauses auto-triggering until `buffer-chars-modified-tick' has
+advanced past this value -- i.e. until the user has actually typed
+something more, not merely until some time has passed.  Set by choosing
+\"suppress until I type more\" from `metal-butt-toggle-autocomplete''s
+adjust prompt (a prefix argument).")
+
+(defvar-local metal-butt-complete--autocomplete-idle-delay nil
+  "Buffer-local override of `metal-butt-autocomplete-idle-delay', or nil to
+use the global default.  Set by choosing \"increase the idle delay\" from
+`metal-butt-toggle-autocomplete''s adjust prompt (a prefix argument).")
+
+(defun metal-butt-complete--effective-idle-delay ()
+  "Return the idle delay to arm the next auto-trigger timer with."
+  (or metal-butt-complete--autocomplete-idle-delay metal-butt-autocomplete-idle-delay))
+
+(defun metal-butt-complete--autocomplete-fire (buffer)
+  "Auto-trigger a completion in BUFFER if it still makes sense to.
+Guards against: BUFFER having been killed; autocomplete having been
+turned off or paused since the timer was armed; a request already in
+flight; an edit already awaiting review (piling a second, unrequested
+proposal on top of one the user has not looked at yet would be more
+annoying than helpful); and the backend having changed away from
+`copilot-api' since the timer was armed."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq metal-butt-complete--autocomplete-timer nil)
+      (when (and metal-butt-complete--autocomplete-enabled
+                 (not metal-butt-complete--autocomplete-suppressed-tick)
+                 (not metal-butt--in-flight)
+                 (not (metal-butt-overlay-pending-p))
+                 (eq metal-butt-backend 'copilot-api))
+        (metal-butt-log "complete: auto-triggering a completion")
+        (metal-butt-complete-at-point nil)))))
+
+(defun metal-butt-complete--post-command ()
+  "Arm a debounced idle timer to auto-trigger a completion after an edit.
+Installed on `post-command-hook' only while
+`metal-butt-complete--autocomplete-enabled' is non-nil for this buffer --
+see `metal-butt-toggle-autocomplete'.  Mirrors the trigger shape
+copilot.el uses for its own ghost-text completions (arm on
+`post-command-hook', fire from `run-with-idle-timer'), except gated on
+the buffer having actually changed rather than on every command, since a
+real network request is too expensive to fire on point motion alone."
+  (when (and metal-butt-complete--autocomplete-suppressed-tick
+             (/= (buffer-chars-modified-tick)
+                 metal-butt-complete--autocomplete-suppressed-tick))
+    (setq metal-butt-complete--autocomplete-suppressed-tick nil))
+  (let ((tick (buffer-chars-modified-tick)))
+    (when (and (not metal-butt-complete--autocomplete-suppressed-tick)
+               (not (eql tick metal-butt-complete--autocomplete-last-tick)))
+      (setq metal-butt-complete--autocomplete-last-tick tick)
+      (when metal-butt-complete--autocomplete-timer
+        (cancel-timer metal-butt-complete--autocomplete-timer))
+      (setq metal-butt-complete--autocomplete-timer
+            (run-with-idle-timer (metal-butt-complete--effective-idle-delay) nil
+                                 #'metal-butt-complete--autocomplete-fire
+                                 (current-buffer))))))
+
+(defun metal-butt-complete--autocomplete-adjust ()
+  "Prompt for one of two adjustments to this buffer's running autocomplete.
+Either pause auto-triggering until the next edit (\"not right now\",
+without turning the whole thing off), or raise the idle delay for this
+buffer only."
+  (unless metal-butt-complete--autocomplete-enabled
+    (error "Metal Butt: autocomplete is not enabled in this buffer"))
+  (pcase (completing-read "Autocomplete: "
+                          '("suppress until I type more" "increase the idle delay")
+                          nil t)
+    ("suppress until I type more"
+     (setq metal-butt-complete--autocomplete-suppressed-tick (buffer-chars-modified-tick))
+     (when metal-butt-complete--autocomplete-timer
+       (cancel-timer metal-butt-complete--autocomplete-timer)
+       (setq metal-butt-complete--autocomplete-timer nil))
+     (metal-butt-log "complete: autocomplete suppressed until the next edit")
+     (message "Metal Butt: autocomplete paused until you type something more"))
+    ("increase the idle delay"
+     (let ((seconds (read-number "New idle delay (seconds): "
+                                 (metal-butt-complete--effective-idle-delay))))
+       (setq metal-butt-complete--autocomplete-idle-delay seconds)
+       (metal-butt-log "complete: autocomplete idle delay set to %ss for this buffer" seconds)
+       (message "Metal Butt: autocomplete idle delay set to %ss for this buffer" seconds)))))
+
+;;;###autoload
+(defun metal-butt-toggle-autocomplete (&optional adjust)
+  "Toggle idle-triggered autocomplete for this buffer, off by default.
+When on, `metal-butt-complete-at-point' fires automatically
+`metal-butt-autocomplete-idle-delay' idle seconds after an edit, piling
+its proposal into the exact same accept/reject/Ediff review as a manual
+completion or any other proposed edit -- it never applies anything on
+its own, and never fires while one of its own proposals is still
+awaiting review.
+
+With a prefix argument (ADJUST non-nil), instead of toggling, prompts for
+one of two adjustments to the *running* autocomplete instead -- see
+`metal-butt-complete--autocomplete-adjust'.
+
+Turning autocomplete on requires `metal-butt-backend' to be
+`copilot-api', for the same reason `metal-butt-complete-at-point' does;
+turning it back off always works regardless of the current backend, in
+case the backend was changed while it was on."
+  (interactive "P")
+  (if adjust
+      (metal-butt-complete--autocomplete-adjust)
+    (if metal-butt-complete--autocomplete-enabled
+        (progn
+          (setq metal-butt-complete--autocomplete-enabled nil)
+          (remove-hook 'post-command-hook #'metal-butt-complete--post-command t)
+          (when metal-butt-complete--autocomplete-timer
+            (cancel-timer metal-butt-complete--autocomplete-timer)
+            (setq metal-butt-complete--autocomplete-timer nil))
+          (metal-butt-log "complete: autocomplete disabled for this buffer")
+          (message "Metal Butt: autocomplete disabled"))
+      (unless (eq metal-butt-backend 'copilot-api)
+        (error "Metal Butt: autocomplete is only implemented for the copilot-api backend"))
+      (setq metal-butt-complete--autocomplete-enabled t
+            metal-butt-complete--autocomplete-last-tick (buffer-chars-modified-tick)
+            metal-butt-complete--autocomplete-suppressed-tick nil)
+      (add-hook 'post-command-hook #'metal-butt-complete--post-command nil t)
+      (metal-butt-log "complete: autocomplete enabled for this buffer")
+      (message "Metal Butt: autocomplete enabled (idle delay %ss)"
+               (metal-butt-complete--effective-idle-delay)))))
+
 (provide 'metal-butt-complete)
 ;;; metal-butt-complete.el ends here

@@ -172,5 +172,165 @@ called with in `sent-messages'."
     (should-not metal-butt--in-flight)
     (should (null metal-butt-complete--synced-text))))
 
+;; -- metal-butt-toggle-autocomplete ---------------------------------------
+
+(defmacro metal-butt-complete-test--cancel-timer (&rest body)
+  "Run BODY, then cancel any autocomplete timer it left armed.
+Keeps a failed assertion from leaking a real, running idle timer into
+later tests."
+  (declare (indent 0))
+  `(unwind-protect (progn ,@body)
+     (when metal-butt-complete--autocomplete-timer
+       (cancel-timer metal-butt-complete--autocomplete-timer))))
+
+(ert-deftest metal-butt-toggle-autocomplete-refuses-non-copilot-api-backend ()
+  (with-temp-buffer
+    (let ((metal-butt-backend 'claude))
+      (should-error (metal-butt-toggle-autocomplete))
+      (should-not metal-butt-complete--autocomplete-enabled))))
+
+(ert-deftest metal-butt-toggle-autocomplete-toggles-on-and-off ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-complete-test--cancel-timer
+      (metal-butt-toggle-autocomplete)
+      (should metal-butt-complete--autocomplete-enabled)
+      (should (memq #'metal-butt-complete--post-command post-command-hook))
+      (metal-butt-toggle-autocomplete)
+      (should-not metal-butt-complete--autocomplete-enabled)
+      (should-not (memq #'metal-butt-complete--post-command post-command-hook)))))
+
+(ert-deftest metal-butt-toggle-autocomplete-off-works-regardless-of-backend ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-toggle-autocomplete)
+    (setq metal-butt-backend 'claude)
+    (metal-butt-toggle-autocomplete)
+    (should-not metal-butt-complete--autocomplete-enabled)))
+
+(ert-deftest metal-butt-toggle-autocomplete-off-cancels-a-pending-timer ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-toggle-autocomplete)
+    (insert "x")
+    (metal-butt-complete--post-command)
+    (should (timerp metal-butt-complete--autocomplete-timer))
+    (metal-butt-toggle-autocomplete)
+    (should (null metal-butt-complete--autocomplete-timer))))
+
+(ert-deftest metal-butt-complete-post-command-arms-a-timer-on-a-real-edit ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-complete-test--cancel-timer
+      (metal-butt-toggle-autocomplete)
+      (insert "x")
+      (metal-butt-complete--post-command)
+      (should (timerp metal-butt-complete--autocomplete-timer)))))
+
+(ert-deftest metal-butt-complete-post-command-does-not-rearm-without-a-change ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-complete-test--cancel-timer
+      (metal-butt-toggle-autocomplete)
+      (insert "x")
+      (metal-butt-complete--post-command)
+      (let ((first metal-butt-complete--autocomplete-timer))
+        (metal-butt-complete--post-command)
+        (should (eq first metal-butt-complete--autocomplete-timer))))))
+
+(ert-deftest metal-butt-complete-post-command-clears-suppression-once-changed ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-complete-test--cancel-timer
+      (metal-butt-toggle-autocomplete)
+      (setq metal-butt-complete--autocomplete-suppressed-tick (buffer-chars-modified-tick))
+      (metal-butt-complete--post-command)
+      (should metal-butt-complete--autocomplete-suppressed-tick)
+      (should (null metal-butt-complete--autocomplete-timer))
+      (insert "x")
+      (metal-butt-complete--post-command)
+      (should (null metal-butt-complete--autocomplete-suppressed-tick))
+      (should (timerp metal-butt-complete--autocomplete-timer)))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-triggers-a-completion ()
+  (metal-butt-complete-test--in-buffer
+    (setq metal-butt-complete--autocomplete-enabled t)
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should called))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-skips-when-disabled ()
+  (metal-butt-complete-test--in-buffer
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should-not called))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-skips-while-in-flight ()
+  (metal-butt-complete-test--in-buffer
+    (setq metal-butt-complete--autocomplete-enabled t
+          metal-butt--in-flight t)
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should-not called))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-skips-when-suppressed ()
+  (metal-butt-complete-test--in-buffer
+    (setq metal-butt-complete--autocomplete-enabled t
+          metal-butt-complete--autocomplete-suppressed-tick (buffer-chars-modified-tick))
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should-not called))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-skips-with-a-pending-edit ()
+  (metal-butt-complete-test--in-buffer
+    (insert "int x = 1;\n")
+    (setq metal-butt-complete--autocomplete-enabled t)
+    (metal-butt-overlay-propose-all '((:old "int x = 1;" :new "int x = 2;")))
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should-not called))))
+
+(ert-deftest metal-butt-complete-autocomplete-fire-skips-wrong-backend ()
+  (metal-butt-complete-test--in-buffer
+    (setq metal-butt-complete--autocomplete-enabled t
+          metal-butt-backend 'claude)
+    (let (called)
+      (cl-letf (((symbol-function 'metal-butt-complete-at-point)
+                 (lambda (&optional _interactive) (setq called t))))
+        (metal-butt-complete--autocomplete-fire (current-buffer)))
+      (should-not called))))
+
+;; -- metal-butt-toggle-autocomplete adjust prompt -------------------------
+
+(ert-deftest metal-butt-toggle-autocomplete-adjust-refuses-when-disabled ()
+  (metal-butt-complete-test--in-buffer
+    (should-error (metal-butt-toggle-autocomplete t))))
+
+(ert-deftest metal-butt-toggle-autocomplete-adjust-suppresses-until-next-edit ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-complete-test--cancel-timer
+      (metal-butt-toggle-autocomplete)
+      (insert "x")
+      (metal-butt-complete--post-command)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) "suppress until I type more")))
+        (metal-butt-toggle-autocomplete t))
+      (should metal-butt-complete--autocomplete-suppressed-tick)
+      (should (null metal-butt-complete--autocomplete-timer)))))
+
+(ert-deftest metal-butt-toggle-autocomplete-adjust-increases-the-idle-delay ()
+  (metal-butt-complete-test--in-buffer
+    (metal-butt-toggle-autocomplete)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "increase the idle delay"))
+              ((symbol-function 'read-number) (lambda (&rest _) 42)))
+      (metal-butt-toggle-autocomplete t))
+    (should (= 42 metal-butt-complete--autocomplete-idle-delay))
+    (should (= 42 (metal-butt-complete--effective-idle-delay)))))
+
 (provide 'metal-butt-complete-test)
 ;;; metal-butt-complete-test.el ends here
