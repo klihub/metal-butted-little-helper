@@ -47,6 +47,7 @@
 (require 'json)
 (require 'url)
 (require 'metal-butt-response)
+(require 'metal-butt-log)
 
 (defvar metal-butt-request-timeout)
 (declare-function metal-butt-active-model "metal-butt-transport")
@@ -170,8 +171,12 @@ token itself if this background attempt fails."
                (lambda ()
                  (setq metal-butt-copilot-api--refresh-timer nil)
                  (condition-case e
-                     (metal-butt-copilot-api--exchange-token)
+                     (progn
+                       (metal-butt-copilot-api--exchange-token)
+                       (metal-butt-log "copilot-api: background token refresh succeeded"))
                    (error
+                    (metal-butt-log "copilot-api: background token refresh failed: %s"
+                                     (error-message-string e))
                     (message "Metal Butt: background token refresh failed (%s); will retry on next request"
                              (error-message-string e)))))))))))
 

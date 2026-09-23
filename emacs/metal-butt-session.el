@@ -7,6 +7,8 @@
 
 ;;; Code:
 
+(require 'metal-butt-log)
+
 (defun metal-butt-session-dir (repo-root)
   "Return the state directory for REPO-ROOT."
   (expand-file-name ".claude/metal-butt/" repo-root))
@@ -81,14 +83,19 @@ not degrade by telephone game across generations.")
 
 (defun metal-butt-session-roll (repo-root)
   "Ask the current session for a self-handoff, then start the next generation."
+  (metal-butt-log "roll: requesting self-handoff for session=%s"
+                   (metal-butt-session-current-id repo-root))
   (metal-butt-transport-send
    metal-butt-session-roll-prompt
    (metal-butt-session-current-id repo-root)
    (lambda (result error)
      (if error
-         (message "Metal Butt: roll aborted, session left alone (%s)" error)
+         (progn
+           (metal-butt-log "roll aborted: %s" error)
+           (message "Metal Butt: roll aborted, session left alone (%s)" error))
        (metal-butt-handoff-append repo-root 'self-handoff (plist-get result :text))
        (let ((generation (metal-butt-session-bump-generation repo-root)))
+         (metal-butt-log "roll: session rolled to generation %d" generation)
          (message "Metal Butt: rolled to generation %d" generation))))))
 
 (provide 'metal-butt-session)

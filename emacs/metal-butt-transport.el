@@ -12,6 +12,7 @@
 
 (require 'seq)
 (require 'metal-butt-response)
+(require 'metal-butt-log)
 (require 'metal-butt-transport-copilot)
 (require 'metal-butt-transport-copilot-api)
 
@@ -320,6 +321,7 @@ persists."
       (lambda (result error)
         (if (and error (metal-butt-copilot-api--unavailable-error-p error))
             (progn
+              (metal-butt-log "copilot-api unavailable (%s); falling back to the copilot CLI" error)
               (unless metal-butt--copilot-api-fallback-warned
                 (setq metal-butt--copilot-api-fallback-warned t)
                 (message "Metal Butt: copilot-api unavailable (%s); falling back to the copilot CLI for this request"

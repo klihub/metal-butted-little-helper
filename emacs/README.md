@@ -70,6 +70,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 | `C-c s` | Show backend, model, session id, and last-exchange status |
 | `C-c t` | Retry the last prompt (prefix arg: choose a different model) |
+| `C-c l` | Show the events log (`*metal-butt events*`) |
 
 ## Asking without editing the buffer
 
@@ -356,6 +357,21 @@ you can see it approaching the cap. This is independent of
 (a large buffer, a big handoff note) by starting an entirely fresh
 session.
 
+## Diagnosing problems: the events log
+
+`C-c l` (`metal-butt-show-log`) opens `*metal-butt events*`, a persistent,
+timestamped, append-only log of what Metal Butt actually did, kept
+separately from the echo area (which only keeps the last message) and
+`*Messages*` (which mixes in everything else Emacs and every other package
+logs). One line is recorded for every request dispatched and every
+result/error, regardless of backend, plus a few events that never
+otherwise surface as a user-visible message: a `copilot-api` backend
+falling back to the `copilot` CLI, and the outcome of `copilot-api`'s
+background bearer-token refresh. The buffer is capped at
+`metal-butt-log-max-chars`, dropping the oldest lines once exceeded, so it
+stays bounded over a long Emacs session; set `metal-butt-log-enabled` to
+nil to turn logging off entirely.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -383,8 +399,15 @@ session.
 | `metal-butt-history-max-entries` | `200` | Prompts kept in the persisted `M-p` history file before oldest entries are dropped |
 | `metal-butt-roll-threshold` | `60000` | Input tokens before offering a roll |
 | `metal-butt-delete-prompt-after-send` | `nil` | Remove the prompt comment once answered |
+| `metal-butt-log-enabled` | `t` | Log requests/results/fallbacks to `*metal-butt events*` (`C-c l`) |
+| `metal-butt-log-max-chars` | `200000` | Approximate cap on the events log buffer's size before oldest lines are dropped |
 
 ## Troubleshooting
+
+**Something went wrong and it's not clear what or when.** `C-c l`
+(`M-x metal-butt-show-log`) opens `*metal-butt events*`, a timestamped
+history of every request, its outcome, and backend-level events (fallbacks,
+token refreshes) — see "Diagnosing problems: the events log" above.
 
 **A response failed to parse.** `M-x metal-butt-show-last-exchange` shows the
 argv, the request sent on stdin, and the raw stdout and stderr of the last CLI

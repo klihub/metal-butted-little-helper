@@ -19,6 +19,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'metal-butt-log)
 (require 'metal-butt-prompt)
 (require 'metal-butt-context)
 (require 'metal-butt-transport)
@@ -183,14 +184,20 @@ discarded response does not consume pending handoff context."
               metal-butt--last-input-tokens 0
               metal-butt--last-premium-requests 0)
         (force-mode-line-update)
+        (metal-butt-log "request failed: %s" error)
         (message "Metal Butt: %s" error))
        ((and (/= tick (buffer-chars-modified-tick))
              (not (eq (plist-get prompt :reply) 'window)))
+        (metal-butt-log "response discarded: buffer changed while the request was in flight")
         (message "Metal Butt: buffer changed while the request was in flight; response discarded"))
        (t
         (setq metal-butt--last-cost (plist-get result :cost)
               metal-butt--last-input-tokens (plist-get result :input-tokens)
               metal-butt--last-premium-requests (or (plist-get result :premium-requests) 0))
+        (metal-butt-log "request ok: backend=%s model=%s input-tokens=%d cost=$%.4f premium-requests=%d"
+                         metal-butt-backend (metal-butt-effective-model)
+                         metal-butt--last-input-tokens metal-butt--last-cost
+                         metal-butt--last-premium-requests)
         (condition-case e
             (let ((response (metal-butt-response-parse (plist-get result :text))))
               (metal-butt--apply response prompt)
@@ -237,6 +244,9 @@ prompt located in the buffer also carries :start and :end markers."
     (let ((metal-butt-model (metal-butt-effective-model (plist-get prompt :model))))
       (setq metal-butt--in-flight t)
       (message "Metal Butt: thinking...")
+      (metal-butt-log "dispatch: backend=%s model=%s session=%s bytes=%d"
+                       metal-butt-backend metal-butt-model
+                       (metal-butt-session-current-id root) (length request))
       (condition-case err
           (metal-butt-transport-send
            request
@@ -250,6 +260,7 @@ prompt located in the buffer also carries :start and :end markers."
                    (when preview (metal-butt--show-reply-progress preview)))))))
         (error
          (setq metal-butt--in-flight nil)
+         (metal-butt-log "dispatch failed before send: %s" (error-message-string err))
          (signal (car err) (cdr err)))))))
 
 (defun metal-butt-send-prompt ()
@@ -480,7 +491,8 @@ variables and `metal-butt-show-last-exchange', in one place."
               (t "")))))
 
 (defconst metal-butt--modules
-  '("metal-butt-prompt"
+  '("metal-butt-log"
+    "metal-butt-prompt"
     "metal-butt-context"
     "metal-butt-response"
     "metal-butt-transport-copilot"
@@ -530,6 +542,7 @@ yourself.")
 (define-key metal-butt-mode-map (kbd "C-c m") #'metal-butt-set-model)
 (define-key metal-butt-mode-map (kbd "C-c s") #'metal-butt-status)
 (define-key metal-butt-mode-map (kbd "C-c t") #'metal-butt-retry)
+(define-key metal-butt-mode-map (kbd "C-c l") #'metal-butt-show-log)
 
 ;;;###autoload
 (define-minor-mode metal-butt-mode
