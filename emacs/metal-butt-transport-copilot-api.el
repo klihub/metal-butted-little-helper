@@ -196,6 +196,22 @@ non-streaming request to the same endpoint always works as a fallback."
   :type 'boolean
   :group 'metal-butt)
 
+(defun metal-butt-copilot-api--build-body-from-messages (messages model &optional stream)
+  "Build the JSON request body sending MESSAGES verbatim under MODEL.
+MESSAGES is a list of `(role . content)' alists, already in the shape the
+chat/completions API expects -- the caller decides what conversation
+state to send (a single user turn, or a growing multi-turn history);
+this only wraps it with MODEL/STREAM.  `metal-butt-copilot-api--build-body'
+below is the single-shot special case every request except
+`metal-butt-complete''s persistent completion session uses.  STREAM
+controls the `stream' field and, when non-nil, also requests
+`stream_options.include_usage' -- see that function's docstring for why."
+  (json-serialize
+   `((model . ,model)
+     (stream . ,(if stream t :false))
+     ,@(when stream '((stream_options . ((include_usage . t)))))
+     (messages . ,(vconcat messages)))))
+
 (defun metal-butt-copilot-api--build-body (request model &optional stream)
   "Build the JSON request body for REQUEST under MODEL.
 Prepends `metal-butt-response-contract' to REQUEST, the same way
@@ -210,12 +226,10 @@ non-streaming behavior.  When STREAM is non-nil, also requests
 `:input-tokens' silently reports 0 and `metal-butt-session-should-roll-p'
 never fires for this backend while streaming; asking for it here makes
 the roll nudge work the same regardless of `metal-butt-copilot-api-stream'."
-  (json-serialize
-   `((model . ,model)
-     (stream . ,(if stream t :false))
-     ,@(when stream '((stream_options . ((include_usage . t)))))
-     (messages . [((role . "user")
-                   (content . ,(concat metal-butt-response-contract "\n\n" request)))]))))
+  (metal-butt-copilot-api--build-body-from-messages
+   (list `((role . "user")
+           (content . ,(concat metal-butt-response-contract "\n\n" request))))
+   model stream))
 
 (defun metal-butt-copilot-api--auth-header (token)
   "Build the `authorization' header value carrying TOKEN.
@@ -363,12 +377,14 @@ figure for this backend, since the API's response never carries a cost."
     (let ((text (if (string-empty-p (string-trim err)) out err)))
       (funcall callback nil (format "curl failed (exit %d): %s" code text)))))
 
-(defun metal-butt-transport-copilot-api--launch (request session-id callback &optional progress)
-  "Send REQUEST for SESSION-ID to the Copilot chat-completions API.
-SESSION-ID is accepted for interface parity with the other two backends'
-launch functions but unused: this backend has no server-side session
-concept, since it makes a single-turn call carrying the whole buffer, the
-same as the other two backends effectively do already.
+(defun metal-butt-copilot-api--launch-body (body callback &optional progress)
+  "Send already-built JSON BODY to the chat/completions endpoint.
+Shared by `metal-butt-transport-copilot-api--launch' (a single-shot
+request built from a plain request string) and
+`metal-butt-transport-copilot-api--launch-messages' (an explicit,
+caller-assembled multi-turn message array) -- the two differ only in how
+BODY is built, not in how it reaches the API, so the process/timer/
+sentinel plumbing lives here once instead of twice.
 
 When `metal-butt-copilot-api-stream' is non-nil, the request asks for a
 streaming response and, if PROGRESS is given, calls it as (PROGRESS TEXT)
@@ -376,13 +392,10 @@ with the reply text reassembled so far every time a new chunk arrives —
 letting a caller show the answer growing live instead of only once the
 whole thing has arrived.  PROGRESS is never called with a final/complete
 guarantee; only CALLBACK's eventual result is authoritative."
-  (ignore session-id)
   (condition-case e
       (let* ((start-time (float-time))
              (token (metal-butt-copilot-api--ensure-token))
-             (model (metal-butt-active-model))
              (streaming metal-butt-copilot-api-stream)
-             (body (metal-butt-copilot-api--build-body request model streaming))
              (stdout (generate-new-buffer " *metal-butt-copilot-api-stdout*"))
              (stderr (generate-new-buffer " *metal-butt-copilot-api-stderr*"))
              (done nil)
@@ -390,7 +403,7 @@ guarantee; only CALLBACK's eventual result is authoritative."
              (proc nil)
              (redacted-argv (metal-butt-copilot-api--curl-command "authorization: ******")))
         (setq metal-butt-transport-copilot-api-last-exchange
-              (list :argv redacted-argv :request request))
+              (list :argv redacted-argv :request body))
         (setq proc
               (make-process
                :name "metal-butt-copilot-api"
@@ -448,6 +461,33 @@ guarantee; only CALLBACK's eventual result is authoritative."
     (metal-butt-copilot-api-transport-error
      (funcall callback nil (cadr e)))))
 
+(defun metal-butt-transport-copilot-api--launch (request session-id callback &optional progress)
+  "Send REQUEST for SESSION-ID to the Copilot chat-completions API.
+SESSION-ID is accepted for interface parity with the other two backends'
+launch functions but unused: this backend has no server-side session
+concept, since it makes a single-turn call carrying the whole buffer, the
+same as the other two backends effectively do already.  See
+`metal-butt-copilot-api--launch-body' for PROGRESS and streaming."
+  (ignore session-id)
+  (metal-butt-copilot-api--launch-body
+   (metal-butt-copilot-api--build-body request (metal-butt-active-model)
+                                       metal-butt-copilot-api-stream)
+   callback progress))
+
+(defun metal-butt-transport-copilot-api--launch-messages (messages callback &optional progress)
+  "Send MESSAGES, an explicit multi-turn chat/completions history, directly.
+MESSAGES is a list of `(role . content)' alists, oldest first; unlike
+`metal-butt-transport-copilot-api--launch', the caller has already
+decided the whole conversation to send (a system contract message plus a
+growing run of user/assistant turns, say), so there is no plain request
+string to wrap in a single user message here.  Used by
+`metal-butt-complete' for its persistent, diff-based completion session.
+See `metal-butt-copilot-api--launch-body' for PROGRESS and streaming."
+  (metal-butt-copilot-api--launch-body
+   (metal-butt-copilot-api--build-body-from-messages
+    messages (metal-butt-active-model) metal-butt-copilot-api-stream)
+   callback progress))
+
 (defvar metal-butt-transport-copilot-api-function
   #'metal-butt-transport-copilot-api--launch
   "Function used to reach the Copilot chat-completions API.
@@ -458,6 +498,18 @@ Called as (FN REQUEST SESSION-ID CALLBACK PROGRESS).  Rebind in tests.")
 PROGRESS, if given, is forwarded as the streaming-progress callback; see
 `metal-butt-transport-copilot-api--launch'."
   (funcall metal-butt-transport-copilot-api-function request session-id callback progress))
+
+(defvar metal-butt-transport-copilot-api-messages-function
+  #'metal-butt-transport-copilot-api--launch-messages
+  "Function used to send an explicit multi-turn message array to the
+Copilot chat-completions API.  Called as (FN MESSAGES CALLBACK PROGRESS).
+Rebind in tests, the same way `metal-butt-transport-copilot-api-function'
+is rebound for the single-shot request path.")
+
+(defun metal-butt-transport-copilot-api-send-messages (messages callback &optional progress)
+  "Send MESSAGES via `metal-butt-transport-copilot-api-messages-function'.
+See `metal-butt-transport-copilot-api--launch-messages'."
+  (funcall metal-butt-transport-copilot-api-messages-function messages callback progress))
 
 (defun metal-butt-copilot-api--unavailable-error-p (error-string)
   "Non-nil if ERROR-STRING indicates the `copilot-api' backend is simply

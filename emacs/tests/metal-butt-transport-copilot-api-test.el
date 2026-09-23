@@ -208,5 +208,60 @@ streaming -- see `metal-butt-copilot-api--stream-usage'."
     (metal-butt-transport-copilot-api-send "req" "sid" (lambda (&rest _) nil))
     (should (equal called '("req" "sid")))))
 
+(ert-deftest metal-butt-copilot-api-build-body-from-messages-sends-messages-verbatim ()
+  (let* ((messages (list '((role . "system") (content . "the contract"))
+                         '((role . "user") (content . "hello"))))
+         (body (metal-butt-copilot-api--build-body-from-messages messages "claude-sonnet-5"))
+         (data (json-parse-string body :object-type 'alist)))
+    (should (equal "claude-sonnet-5" (alist-get 'model data)))
+    (let ((sent (append (alist-get 'messages data) nil)))
+      (should (= 2 (length sent)))
+      (should (equal "system" (alist-get 'role (elt sent 0))))
+      (should (equal "the contract" (alist-get 'content (elt sent 0))))
+      (should (equal "user" (alist-get 'role (elt sent 1))))
+      (should (equal "hello" (alist-get 'content (elt sent 1)))))))
+
+(ert-deftest metal-butt-copilot-api-build-body-from-messages-does-not-add-the-contract ()
+  "Unlike `metal-butt-copilot-api--build-body', which prepends the contract
+itself, the messages-array path leaves that entirely to the caller -- a
+persistent multi-turn session states the contract once, not on every turn."
+  (let* ((body (metal-butt-copilot-api--build-body-from-messages
+                (list '((role . "user") (content . "hello"))) "claude-sonnet-5"))
+         (data (json-parse-string body :object-type 'alist))
+         (content (alist-get 'content (elt (alist-get 'messages data) 0))))
+    (should (equal "hello" content))))
+
+(ert-deftest metal-butt-copilot-api-build-body-delegates-to-build-body-from-messages ()
+  "Regression test: `--build-body' must still wrap REQUEST as a single user
+message with the contract prepended, now via the shared builder."
+  (let* ((body (metal-butt-copilot-api--build-body "the request body" "claude-sonnet-5"))
+         (data (json-parse-string body :object-type 'alist))
+         (messages (append (alist-get 'messages data) nil)))
+    (should (= 1 (length messages)))
+    (should (equal "user" (alist-get 'role (elt messages 0))))
+    (should (string-prefix-p metal-butt-response-contract
+                             (alist-get 'content (elt messages 0))))))
+
+(ert-deftest metal-butt-copilot-api-send-messages-dispatches-through-the-injectable-seam ()
+  (let* ((called nil)
+         (metal-butt-transport-copilot-api-messages-function
+          (lambda (messages cb &optional _progress)
+            (setq called messages) (funcall cb '(:text "ok") nil))))
+    (metal-butt-transport-copilot-api-send-messages
+     (list '((role . "user") (content . "hi"))) (lambda (&rest _) nil))
+    (should (equal called (list '((role . "user") (content . "hi")))))))
+
+(ert-deftest metal-butt-copilot-api-launch-messages-builds-and-sends-the-body ()
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'metal-butt-copilot-api--launch-body)
+               (lambda (body callback &optional _progress)
+                 (setq sent body)
+                 (funcall callback '(:text "ok") nil))))
+      (metal-butt-transport-copilot-api--launch-messages
+       (list '((role . "user") (content . "hi"))) (lambda (&rest _) nil)))
+    (let* ((data (json-parse-string sent :object-type 'alist))
+           (messages (append (alist-get 'messages data) nil)))
+      (should (equal "hi" (alist-get 'content (elt messages 0)))))))
+
 (provide 'metal-butt-transport-copilot-api-test)
 ;;; metal-butt-transport-copilot-api-test.el ends here
