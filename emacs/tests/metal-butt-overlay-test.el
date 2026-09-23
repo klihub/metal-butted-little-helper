@@ -1,5 +1,6 @@
 ;;; metal-butt-overlay-test.el --- Tests for edit overlays  -*- lexical-binding: t; -*-
 (require 'ert)
+(require 'cl-lib)
 (require 'metal-butt-overlay)
 
 (ert-deftest metal-butt-overlay-locates-unique-match ()
@@ -210,3 +211,110 @@
 (ert-deftest metal-butt-overlay-reject-hunk-without-proposal-is-an-error ()
   (with-temp-buffer
     (should-error (metal-butt-overlay-reject-hunk))))
+
+(ert-deftest metal-butt-overlay-review-ediff-errors-without-a-proposal ()
+  (with-temp-buffer
+    (should-error (metal-butt-overlay-review-ediff))))
+
+(ert-deftest metal-butt-overlay-review-ediff-leaves-this-buffer-untouched ()
+  "Ediff, not the overlay queue, is responsible for deciding the rest --
+this buffer must still read as it did before, and no longer have
+anything pending, once Ediff has been handed the work."
+  (with-temp-buffer
+    (insert "alpha\nbeta\n")
+    (metal-butt-overlay-propose '(:old "beta" :new "BETA"))
+    (let (captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b &rest _) (setq captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (should-not (metal-butt-overlay-pending-p))
+      (should (equal (buffer-string) "alpha\nbeta\n"))
+      (kill-buffer captured-b))))
+
+(ert-deftest metal-butt-overlay-review-ediff-passes-this-buffer-as-buffer-a ()
+  (with-temp-buffer
+    (insert "alpha\n")
+    (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+    (let ((this-buffer (current-buffer))
+          captured-a captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (a b &rest _) (setq captured-a a captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (should (eq captured-a this-buffer))
+      (kill-buffer captured-b))))
+
+(ert-deftest metal-butt-overlay-review-ediff-builds-a-fully-applied-buffer-b ()
+  (with-temp-buffer
+    (insert "alpha\nbeta\n")
+    (metal-butt-overlay-propose '(:old "beta" :new "BETA"))
+    (let (captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b &rest _) (setq captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (unwind-protect
+          (should (equal (with-current-buffer captured-b (buffer-string))
+                          "alpha\nBETA\n"))
+        (kill-buffer captured-b)))))
+
+(ert-deftest metal-butt-overlay-review-ediff-applies-every-remaining-hunk ()
+  "A partly-reviewed multi-hunk edit still gets buffer B fully applied."
+  (with-temp-buffer
+    (insert "line one\nline two\nline three\n")
+    (metal-butt-overlay-propose
+     '(:old "line one\nline two\nline three" :new "LINE one\nline two\nLINE three"))
+    (metal-butt-overlay-accept-hunk)
+    (let (captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b &rest _) (setq captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (unwind-protect
+          (should (equal (with-current-buffer captured-b (buffer-string))
+                          "LINE one\nline two\nLINE three\n"))
+        (kill-buffer captured-b)))))
+
+(ert-deftest metal-butt-overlay-review-ediff-applies-the-whole-remaining-queue ()
+  (with-temp-buffer
+    (insert "one\ntwo\nthree\n")
+    (metal-butt-overlay-propose-all
+     '((:old "one" :new "1") (:old "two" :new "2") (:old "three" :new "3")))
+    (let (captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b &rest _) (setq captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (unwind-protect
+          (should (equal (with-current-buffer captured-b (buffer-string))
+                          "1\n2\n3\n"))
+        (kill-buffer captured-b)))))
+
+(ert-deftest metal-butt-overlay-review-ediff-skips-a-stale-queued-edit-in-buffer-b ()
+  (with-temp-buffer
+    (insert "one\ntwo\n")
+    (metal-butt-overlay-propose-all
+     '((:old "one" :new "1") (:old "vanished" :new "x") (:old "two" :new "2")))
+    (let (captured-b)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b &rest _) (setq captured-b b))))
+        (metal-butt-overlay-review-ediff))
+      (unwind-protect
+          (should (equal (with-current-buffer captured-b (buffer-string))
+                          "1\n2\n"))
+        (kill-buffer captured-b)))))
+
+(ert-deftest metal-butt-overlay-review-ediff-cleans-up-buffer-b-on-ediff-quit ()
+  "The startup hook Ediff runs must arrange for buffer B to be killed once
+the Ediff session is quit, so a review does not leak scratch buffers."
+  (with-temp-buffer
+    (insert "alpha\n")
+    (metal-butt-overlay-propose '(:old "alpha" :new "ALPHA"))
+    (let (captured-b captured-hooks)
+      (cl-letf (((symbol-function 'ediff-buffers)
+                 (lambda (_a b hooks &rest _) (setq captured-b b captured-hooks hooks))))
+        (metal-butt-overlay-review-ediff))
+      (should (buffer-live-p captured-b))
+      ;; Stand in for Ediff's control buffer: run the startup hook there,
+      ;; then fire ediff-quit-hook the way quitting Ediff would.
+      (with-temp-buffer
+        (dolist (hook captured-hooks) (funcall hook))
+        (run-hooks 'ediff-quit-hook))
+      (should-not (buffer-live-p captured-b)))))
+

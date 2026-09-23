@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'ediff)
 
 (define-error 'metal-butt-overlay-no-match
   "Proposed edit does not match the buffer")
@@ -357,6 +358,66 @@ shown."
                               (metal-butt-overlay--style))
   (message "Metal Butt: showing proposed edit as %s"
            (metal-butt-overlay--style)))
+
+(defun metal-butt-overlay--build-fully-applied-copy (snapshot text)
+  "Return a new buffer holding TEXT with every hunk/edit in SNAPSHOT applied.
+SNAPSHOT is a plist of :hunks :current :queue :hunk-total, captured from
+the buffer under review before responsibility for it moves to Ediff.
+Applies them by replaying the exact same resolution path
+`metal-butt-accept' uses -- `metal-butt-overlay--resolve-hunk' and
+`metal-butt-overlay--next' chaining across every queued edit in turn --
+against this new buffer instead of the original, so \"what full
+acceptance would produce\" can never drift from what accepting really
+does; it is the same code, just run against a scratch copy first."
+  (let ((buffer (generate-new-buffer " *metal-butt-ediff-proposed*")))
+    (with-current-buffer buffer
+      (insert text)
+      (setq metal-butt-overlay--hunks (plist-get snapshot :hunks)
+            metal-butt-overlay--current (plist-get snapshot :current)
+            metal-butt-overlay--queue (plist-get snapshot :queue)
+            metal-butt-overlay--hunk-total (plist-get snapshot :hunk-total)
+            metal-butt-overlay--style-override nil)
+      (metal-butt-overlay--show-head)
+      (let ((inhibit-message t))
+        (while metal-butt-overlay--current
+          (metal-butt-overlay--resolve-hunk t))))
+    buffer))
+
+(defun metal-butt-overlay-review-ediff ()
+  "Review every remaining proposed edit at once in an Ediff session.
+Builds a scratch buffer holding what this buffer would look like if every
+still-pending hunk of the edit under review, and every edit still queued
+behind it, were fully accepted, then runs `ediff-buffers' between this
+buffer and that scratch buffer. Ediff's own per-hunk commands then decide
+each diff region instead of the one-hunk-at-a-time flow
+`metal-butt-accept'/`metal-butt-overlay-accept-hunk' use: `b' pulls a
+region's proposed text into this buffer, leaving a region alone rejects
+it, and either buffer can be hand-edited too, useful for seeing the whole
+planned changeset's shape before committing to any of it.
+
+This buffer's own pending-hunk state is cleared first: once Ediff is
+driving, it -- not the overlay queue -- decides what happens to the rest
+of this edit set, and the overlay's own tracked positions would go stale
+the moment Ediff or the user edits either buffer anyway. Quitting Ediff
+kills the scratch buffer; this buffer is left holding whatever was
+chosen, with nothing left pending."
+  (interactive)
+  (unless (metal-butt-overlay-pending-p)
+    (error "No proposed edit to review"))
+  (let* ((real-buffer (current-buffer))
+         (snapshot (list :hunks (copy-tree metal-butt-overlay--hunks)
+                          :current (copy-tree metal-butt-overlay--current)
+                          :queue (copy-tree metal-butt-overlay--queue)
+                          :hunk-total metal-butt-overlay--hunk-total))
+         (text (buffer-string)))
+    (metal-butt-overlay--clear)
+    (let ((proposed (metal-butt-overlay--build-fully-applied-copy snapshot text)))
+      (ediff-buffers
+       real-buffer proposed
+       (list (lambda ()
+               (add-hook 'ediff-quit-hook
+                         (lambda () (when (buffer-live-p proposed) (kill-buffer proposed)))
+                         nil t)))))))
 
 (provide 'metal-butt-overlay)
 ;;; metal-butt-overlay.el ends here

@@ -67,6 +67,7 @@ credentials have expired, refresh them in a terminal first.
 | `C-c h a` | Accept just the current hunk, then advance to the next |
 | `C-c h r` | Reject just the current hunk, then advance to the next |
 | `C-c C-d` | Toggle the current hunk between full-region and diff-style view |
+| `C-c C-e` | Review every remaining proposed edit at once in Ediff |
 | `C-c m` | Set the model (prefix arg: this buffer only) |
 | `C-c s` | Show backend, model, session id, and last-exchange status |
 | `C-c t` | Retry the last prompt (prefix arg: choose a different model) |
@@ -140,6 +141,26 @@ The minibuffer message while a hunk is under review shows `(k/n hunks)`
 once an edit has more than one, so you always know where you are in a
 multi-hunk edit. Hunks are resolved strictly in order; once the last hunk of
 an edit is resolved, review moves on to the next queued edit, if any.
+
+## Reviewing the whole planned changeset at once with Ediff
+
+The one-hunk-at-a-time flow above only ever shows you one change in
+context. `C-c C-e` (`metal-butt-overlay-review-ediff`) instead builds a
+scratch buffer holding what this buffer would look like if every
+still-pending hunk of the edit under review, and every edit still queued
+behind it, were fully accepted, then opens `ediff-buffers` between this
+buffer and that scratch buffer — so the whole planned changeset is laid
+out as one ordinary Ediff session, with its usual `n`/`p` to move between
+diff regions, `b` to pull a region's proposed text into this buffer (`a`
+does the reverse, restoring this buffer's own text in that region), and
+either buffer can be hand-edited directly before moving on.
+
+This buffer's own pending-hunk state is cleared the moment Ediff takes
+over — Ediff, not the overlay queue, now owns deciding what happens to
+the rest of this edit set — so `metal-butt-accept`/`metal-butt-reject`
+and the per-hunk commands above no longer apply once you are in an Ediff
+session. Quitting Ediff (`q`) kills the scratch buffer and leaves this
+buffer holding whatever combination you chose.
 
 ## Choosing a model
 
